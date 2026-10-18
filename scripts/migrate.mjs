@@ -42,8 +42,15 @@ const database = process.env.MYSQL_DATABASE;
 
 async function main() {
   const root = await mysql.createConnection({ host, port, user, password });
+  const [versionRows] = await root.query("SELECT VERSION() AS version");
+  const serverVersion = String(versionRows[0]?.version ?? "");
+  // utf8mb4_unicode_ci tersedia di MySQL 5.7+/8.x dan MariaDB, jadi schema
+  // memakai collation ini agar portable.
+  const collation = "utf8mb4_unicode_ci";
+  console.log(`Server: ${serverVersion} (collation: ${collation})`);
+
   await root.query(
-    `CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`
+    `CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE ${collation}`
   );
   await root.end();
 
@@ -57,6 +64,53 @@ async function main() {
     charset: "utf8mb4",
   });
 
+  const [existing] = await connection.query(
+    `SELECT TABLE_NAME AS name, TABLE_COLLATION AS collation
+       FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?`,
+    [database]
+  );
+
+  const needsConversion = existing.some(
+    (table) => table.collation && table.collation !== collation
+  );
+
+  if (needsConversion) {
+    // Foreign key harus dilepas dulu: kolom referensi dan yang direferensikan
+    // tidak boleh berbeda collation saat proses konversi.
+    const [foreignKeys] = await connection.query(
+      `SELECT k.CONSTRAINT_NAME AS name, k.TABLE_NAME AS tableName, k.COLUMN_NAME AS columnName,
+              k.REFERENCED_TABLE_NAME AS refTable, k.REFERENCED_COLUMN_NAME AS refColumn,
+              r.DELETE_RULE AS onDelete
+         FROM information_schema.KEY_COLUMN_USAGE k
+         JOIN information_schema.REFERENTIAL_CONSTRAINTS r
+           ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA
+          AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+        WHERE k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_NAME IS NOT NULL`,
+      [database]
+    );
+
+    for (const fk of foreignKeys) {
+      await connection.query(`ALTER TABLE \`${fk.tableName}\` DROP FOREIGN KEY \`${fk.name}\``);
+    }
+
+    for (const table of existing) {
+      console.log(`Menyesuaikan collation ${table.name}: ${table.collation} -> ${collation}`);
+      await connection.query(
+        `ALTER TABLE \`${table.name}\` CONVERT TO CHARACTER SET utf8mb4 COLLATE ${collation}`
+      );
+    }
+
+    for (const fk of foreignKeys) {
+      await connection.query(
+        `ALTER TABLE \`${fk.tableName}\`
+           ADD CONSTRAINT \`${fk.name}\` FOREIGN KEY (\`${fk.columnName}\`)
+           REFERENCES \`${fk.refTable}\` (\`${fk.refColumn}\`) ON DELETE ${fk.onDelete}`
+      );
+    }
+
+    console.log(`Foreign key dipulihkan: ${foreignKeys.length}`);
+  }
+
   const schema = readFileSync(join(process.cwd(), "db", "schema.sql"), "utf8");
   const statements = schema
     .split(/;\s*$/m)
@@ -69,8 +123,21 @@ async function main() {
     )
     .filter(Boolean);
 
-  for (const statement of statements) {
-    await connection.query(statement);
+  for (const [index, statement] of statements.entries()) {
+    try {
+      await connection.query(statement);
+    } catch (error) {
+      const table = /CREATE TABLE IF NOT EXISTS (\w+)/i.exec(statement)?.[1] ?? `statement #${index + 1}`;
+      console.error(`\nGagal pada ${table}: ${error.sqlMessage ?? error.message}`);
+      if (error.errno === 150) {
+        console.error(
+          "Foreign key gagal: pastikan tabel yang direferensikan sudah dibuat lebih dulu " +
+            "dan kolomnya punya tipe + collation yang sama."
+        );
+      }
+      await connection.end();
+      process.exit(1);
+    }
   }
 
   await connection.end();

@@ -1,29 +1,26 @@
 [Unit]
-Description=Keeva AI (Next.js)
+Description=Aikeeva AI (Next.js)
 After=network.target mysql.service
 Wants=mysql.service
 
 [Service]
 Type=simple
-User=keeva
-Group=keeva
-WorkingDirectory=/var/www/keeva
+# Folder hasil clone: /root/aikeeva
+WorkingDirectory=/root/aikeeva
 Environment=NODE_ENV=production
 Environment=PORT=3000
-Environment=MEDIA_DIR=/var/lib/keeva/media
+Environment=MEDIA_DIR=/root/aikeeva/.data/media
 Environment=MYSQL_POOL_SIZE=10
 ExecStart=/usr/bin/npm run start
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=keeva
+SyslogIdentifier=aikeeva
 
-# Hardening
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
-ReadWritePaths=/var/lib/keeva /var/www/keeva/.data
+ReadWritePaths=/root/aikeeva
 
 [Install]
 WantedBy=multi-user.target

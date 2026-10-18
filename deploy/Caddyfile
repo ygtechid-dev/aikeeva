@@ -1,5 +1,5 @@
 # Ganti dengan domain kamu. Caddy mengurus HTTPS otomatis (Let's Encrypt).
-keeva.example.com {
+aikeeva.example.com {
 	encode zstd gzip
 
 	# Upload referensi start/end frame
@@ -23,7 +23,7 @@ keeva.example.com {
 	# Video hasil concat dilayani route /api/media, bukan file statis,
 	# jadi tidak perlu root/file_server di sini.
 	log {
-		output file /var/log/caddy/keeva.log {
+		output file /var/log/caddy/aikeeva.log {
 			roll_size 20MB
 			roll_keep 5
 		}

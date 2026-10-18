@@ -171,7 +171,7 @@ vercel --prod
 | `MYSQL_PORT` | `4000` |
 | `MYSQL_USER` | `xxxxxxxx.root` |
 | `MYSQL_PASSWORD` | `********` |
-| `MYSQL_DATABASE` | `keeva` |
+| `MYSQL_DATABASE` | `aikeeva` |
 | `LEONARDO_API_KEY` | `c1c2...` |
 | `LEONARDO_VIDEO_MODEL` | `hailuo-03` |
 | `OPENAI_API_KEY` | `sk-proj-...` |
@@ -184,7 +184,7 @@ vercel --prod
 Dari mesin lokal, dengan env produksi:
 
 ```bash
-MYSQL_HOST=... MYSQL_USER=... MYSQL_PASSWORD=... MYSQL_DATABASE=keeva \
+MYSQL_HOST=... MYSQL_USER=... MYSQL_PASSWORD=... MYSQL_DATABASE=aikeeva \
   npm run db:migrate
 ```
 
@@ -239,42 +239,49 @@ sudo mysql
 ```
 
 ```sql
-CREATE DATABASE keeva CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE USER 'keeva'@'localhost' IDENTIFIED BY 'PASSWORD_KUAT';
-GRANT ALL PRIVILEGES ON keeva.* TO 'keeva'@'localhost';
+CREATE DATABASE aikeeva CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE USER 'aikeeva'@'localhost' IDENTIFIED BY 'PASSWORD_KUAT';
+GRANT ALL PRIVILEGES ON aikeeva.* TO 'aikeeva'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 ```
 
-### 3. User aplikasi + direktori
+### 3. Folder aplikasi
+
+Kode sudah ada di `/root/aikeeva` (hasil clone). Pastikan dependensi terpasang:
 
 ```bash
-sudo adduser --system --group --home /var/www/keeva keeva
-sudo mkdir -p /var/www/keeva /var/lib/keeva/media
-sudo chown -R keeva:keeva /var/www/keeva /var/lib/keeva
+cd /root/aikeeva
+npm ci
 ```
 
-### 4. Ambil kode & install
+Aplikasi dijalankan sebagai **root** karena folder ada di `/root`. Kalau mau
+lebih aman, pindahkan ke `/var/www/aikeeva` dan buat user khusus (opsional):
 
 ```bash
-sudo -u keeva git clone https://github.com/USER/REPO.git /var/www/keeva
-cd /var/www/keeva
-sudo -u keeva npm ci
+# opsional, lebih aman
+sudo adduser --system --group --home /var/www/aikeeva aikeeva
+sudo mkdir -p /var/www/aikeeva
+sudo rsync -a /root/aikeeva/ /var/www/aikeeva/
+sudo chown -R aikeeva:aikeeva /var/www/aikeeva
 ```
+Kalau memilih opsi ini, ganti `WorkingDirectory` di `deploy/aikeeva.service`
+menjadi `/var/www/aikeeva` dan jalankan `npm` sebagai `sudo -u aikeeva`.
 
-### 5. Environment produksi
+### 4. Environment produksi
 
 ```bash
-sudo -u keeva nano /var/www/keeva/.env.production
+cd /root/aikeeva
+nano .env.production
 ```
 
 ```env
 NODE_ENV=production
 MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3306
-MYSQL_USER=keeva
+MYSQL_USER=aikeeva
 MYSQL_PASSWORD=PASSWORD_KUAT
-MYSQL_DATABASE=keeva
+MYSQL_DATABASE=aikeeva
 MYSQL_POOL_SIZE=10
 
 LEONARDO_API_KEY=xxxx
@@ -282,33 +289,38 @@ LEONARDO_VIDEO_MODEL=hailuo-03
 OPENAI_API_KEY=sk-proj-xxxx
 OPENAI_MODEL=gpt-4.1-mini
 
-MEDIA_DIR=/var/lib/keeva/media
+MEDIA_DIR=/root/aikeeva/.data/media
 COOKIE_SECURE=true
 ```
 
 `COOKIE_SECURE=true` mewajibkan HTTPS. Kalau tes lewat `http://IP:3000`,
 set `false` dulu.
 
-### 6. Migrasi database
+### 5. Migrasi database
 
 ```bash
-cd /var/www/keeva
-sudo -u keeva npm run db:migrate:prod
+cd /root/aikeeva
+npm run db:migrate:prod
 ```
 
-### 7. Build & jalankan
+### 6. Build
 
 ```bash
-cd /var/www/keeva
-sudo -u keeva npm run build
-sudo cp deploy/keeva.service /etc/systemd/system/keeva.service
+cd /root/aikeeva
+npm run build
+```
+
+### 7. Jalankan sebagai service (systemd)
+
+```bash
+sudo cp /root/aikeeva/deploy/aikeeva.service /etc/systemd/system/aikeeva.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now keeva
-sudo systemctl status keeva
+sudo systemctl enable --now aikeeva
+sudo systemctl status aikeeva
 curl -I http://127.0.0.1:3000
 ```
 
-Log: `sudo journalctl -u keeva -f`
+Log: `journalctl -u aikeeva -f`
 
 ### 8. Caddy (reverse proxy + HTTPS otomatis)
 
@@ -320,8 +332,8 @@ curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
   | sudo tee /etc/apt/sources.list.d/caddy-stable.list
 sudo apt update && sudo apt install -y caddy
 
-sudo cp /var/www/keeva/deploy/Caddyfile /etc/caddy/Caddyfile
-sudo nano /etc/caddy/Caddyfile     # ganti keeva.example.com dengan domain kamu
+sudo cp /root/aikeeva/deploy/Caddyfile /etc/caddy/Caddyfile
+sudo nano /etc/caddy/Caddyfile     # ganti aikeeva.example.com dengan domain kamu
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
@@ -331,7 +343,7 @@ DNS A record sudah mengarah ke IP VPS dan port 80/443 terbuka). Cek:
 
 ```bash
 sudo systemctl status caddy
-curl -I https://keeva.example.com
+curl -I https://aikeeva.example.com
 sudo journalctl -u caddy -f
 ```
 
@@ -348,17 +360,17 @@ dan set `COOKIE_SECURE=false` di `.env.production`.
 ### 9. Update versi baru
 
 ```bash
-cd /var/www/keeva
-sudo -u keeva git pull
-sudo -u keeva npm ci
-sudo -u keeva npm run db:migrate:prod   # kalau ada perubahan schema
-sudo -u keeva npm run build
-sudo systemctl restart keeva
+cd /root/aikeeva
+git pull
+npm ci
+npm run db:migrate:prod   # kalau ada perubahan schema
+npm run build
+sudo systemctl restart aikeeva
 ```
 
 ### Catatan produksi
 
-- **Video tersimpan di disk VPS** (`MEDIA_DIR`). Backup `/var/lib/keeva/media`
+- **Video tersimpan di disk VPS** (`MEDIA_DIR`). Backup `/root/aikeeva/.data/media`
   bersama database. Kalau nanti pindah ke multi-server/serverless, ganti
   `src/lib/media/storage.ts` ke object storage (S3/R2).
 - **Render panjang**: `POST /api/generations` mengirim semua klip berurutan.
