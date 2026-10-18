@@ -1,0 +1,29 @@
+[Unit]
+Description=Keeva AI (Next.js)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=keeva
+Group=keeva
+WorkingDirectory=/var/www/keeva
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=MEDIA_DIR=/var/lib/keeva/media
+Environment=MYSQL_POOL_SIZE=10
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=keeva
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/keeva /var/www/keeva/.data
+
+[Install]
+WantedBy=multi-user.target

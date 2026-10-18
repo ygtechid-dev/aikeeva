@@ -116,3 +116,73 @@ export const TOKEN_COSTS = [
 export function formatIdr(n: number) {
   return "Rp " + n.toLocaleString("id-ID");
 }
+
+export type Voice = {
+  id: string;
+  name: string;
+  gender: "Pria" | "Wanita";
+  tone: string;
+  description: string;
+};
+
+export const VOICES: Voice[] = [
+  {
+    id: "budi",
+    name: "Budi",
+    gender: "Pria",
+    tone: "Hangat & Ramah",
+    description: "Cocok untuk produk keluarga, edukasi, testimoni.",
+  },
+  {
+    id: "rara",
+    name: "Rara",
+    gender: "Wanita",
+    tone: "Ceria & Enerjik",
+    description: "Pas untuk F&B, fashion, promo diskon.",
+  },
+  {
+    id: "dimas",
+    name: "Dimas",
+    gender: "Pria",
+    tone: "Berwibawa",
+    description: "Ideal untuk korporat, properti, otomotif.",
+  },
+  {
+    id: "sinta",
+    name: "Sinta",
+    gender: "Wanita",
+    tone: "Lembut & Elegan",
+    description: "Untuk skincare, perhiasan, brand premium.",
+  },
+  {
+    id: "reza",
+    name: "Reza",
+    gender: "Pria",
+    tone: "Santai / Gaul",
+    description: "Cocok untuk produk anak muda dan teknologi.",
+  },
+  {
+    id: "maya",
+    name: "Maya",
+    gender: "Wanita",
+    tone: "Profesional",
+    description: "Untuk SaaS, fintech, dan layanan B2B.",
+  },
+];
+
+export const VOICE_LANGUAGES = [
+  "Bahasa Indonesia",
+  "English (US)",
+  "English (UK)",
+  "Bahasa Melayu",
+  "中文 (Mandarin)",
+];
+
+export const BGM_OPTIONS = [
+  { id: "none", label: "Tanpa Musik", desc: "Hanya voiceover" },
+  { id: "upbeat", label: "Upbeat", desc: "Enerjik, cocok promo" },
+  { id: "calm", label: "Calm", desc: "Tenang, cocok skincare" },
+  { id: "corporate", label: "Corporate", desc: "Bersih & profesional" },
+  { id: "dramatic", label: "Dramatic", desc: "Sinematik, epik" },
+];
+
