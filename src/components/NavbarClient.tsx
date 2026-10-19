@@ -43,6 +43,7 @@ export default function Navbar({ user }: { user: NavUser }) {
         <nav className="hidden md:flex items-center gap-8">
           {link("/", "Beranda")}
           {link("/generator", "Generator")}
+          {link("/motion", "Motion")}
           {link("/history", "Riwayat")}
           {link("/#templates", "Template")}
           {link("/#harga", "Harga")}

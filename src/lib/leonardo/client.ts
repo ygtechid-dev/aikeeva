@@ -76,7 +76,7 @@ function extractError(body: unknown): string | null {
 
 export type LeonardoImageRef = { id: string; type: "UPLOADED" };
 
-export type LeonardoAudioRef = { id: string; type: "UPLOADED" };
+export type LeonardoAudioRef = { id: string; type: "UPLOADED" | "GENERATED" };
 
 export type CreateGenerationInput = {
   model: VideoModelId;
@@ -150,6 +150,12 @@ export async function createVideoGeneration(input: CreateGenerationInput): Promi
 
   if (spec.supportsNegativePrompt && input.negativePrompt) {
     parameters.negative_prompt = input.negativePrompt;
+  }
+
+  // Hailuo 03: audio_reference tidak kompatibel dengan quality TURBO (default).
+  // Paksa STANDARD saat audio reference diberikan.
+  if (input.audioReference && input.model === "hailuo-03") {
+    parameters.quality = "STANDARD";
   }
 
   const guidances: Record<string, unknown> = {};
@@ -274,37 +280,6 @@ export async function uploadAsset(
   const uploadResponse = await fetch(upload.url, { method: "POST", body: form });
   if (!uploadResponse.ok) {
     throw new LeonardoError(`Upload ke storage Leonardo gagal (${uploadResponse.status}).`, 502);
-  }
-
-  return { id: upload.id } satisfies UploadResult;
-}
-
-/** Upload audio untuk audio_reference (Hailuo 03 / Seedance / Wan). */
-export async function uploadAudioAsset(buffer: Buffer, extension: string, mimeType: string) {
-  const init = await request<{
-    uploadInitAudio?: { id?: string; url?: string; fields?: string };
-    uploadInitImage?: { id?: string; url?: string; fields?: string };
-  }>("/v1/init-audio", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ extension }),
-  });
-
-  const upload = init.uploadInitAudio ?? init.uploadInitImage;
-  if (!upload?.id || !upload.url) {
-    throw new LeonardoError("Gagal mendapatkan presigned URL untuk upload audio.", 502, init);
-  }
-
-  const fields = upload.fields ? (JSON.parse(upload.fields) as Record<string, string>) : {};
-  const form = new FormData();
-  for (const [key, value] of Object.entries(fields)) {
-    form.append(key, value);
-  }
-  form.append("file", new Blob([new Uint8Array(buffer)], { type: mimeType }), `upload.${extension}`);
-
-  const uploadResponse = await fetch(upload.url, { method: "POST", body: form });
-  if (!uploadResponse.ok) {
-    throw new LeonardoError(`Upload audio ke storage Leonardo gagal (${uploadResponse.status}).`, 502);
   }
 
   return { id: upload.id } satisfies UploadResult;

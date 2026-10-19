@@ -25,11 +25,6 @@ export type GenerationOptions = {
   talkScript?: string;
 };
 
-export const MOTION_MODES = [
-  { id: "standard", label: "Iklan Standar" },
-  { id: "talk", label: "Foto Ngomong" },
-] as const;
-
 export type UnsupportedFeature = {
   feature: string;
   reason: string;
