@@ -65,11 +65,15 @@ export async function POST(request: Request) {
     const model: VideoModelId = isVideoModelId(modelInput) ? modelInput : resolveVideoModel();
     const spec = VIDEO_MODELS[model];
 
-    if (!spec.supportsAudioReference) {
+    const audioMode = String(form.get("audioMode") ?? "native") === "tts" ? "tts" : "native";
+    if (audioMode === "tts" && !spec.supportsAudioReference) {
       throw new ApiError(
-        `${spec.label} tidak mendukung audio reference untuk lip-sync. Pilih MiniMax Hailuo 03, Wan 2.6, atau Seedance 2.5.`,
+        `${spec.label} tidak mendukung audio reference untuk suara TTS. Pilih MiniMax Hailuo 03, Wan 2.6, atau Seedance 2.5.`,
         400
       );
+    }
+    if (audioMode === "native" && !spec.supportsStartFrame) {
+      throw new ApiError(`${spec.label} tidak mendukung start frame foto wajah.`, 400);
     }
 
     const script = String(form.get("script") ?? "").trim();
@@ -98,12 +102,17 @@ export async function POST(request: Request) {
     const voiceKey = String(form.get("voice") ?? "george").toLowerCase();
     const voiceId = TTS_VOICE_IDS[voiceKey] ?? TTS_VOICE_IDS.george;
 
-    const tts = await createAudioGeneration({
-      text: script,
-      languageCode: languageCodeFor(language),
-      voiceId,
-    });
-    const audioId = await waitForTts(tts.generationId);
+    let audioId: string | null = null;
+    let ttsGenerationId: string | null = null;
+    if (audioMode === "tts") {
+      const tts = await createAudioGeneration({
+        text: script,
+        languageCode: languageCodeFor(language),
+        voiceId,
+      });
+      ttsGenerationId = tts.generationId;
+      audioId = await waitForTts(tts.generationId);
+    }
 
     const compiled = compilePrompt({
       model,
@@ -111,7 +120,7 @@ export async function POST(request: Request) {
       duration,
       userPrompt: script,
       scenes: [] as Scene[],
-      options: { motionMode: "talk", talkScript: script },
+      options: { motionMode: "talk", talkScript: script, audioMode, voiceLanguage: language },
       hasEndFrame: false,
       clipIndex: 0,
       clipCount: 1,
@@ -128,9 +137,9 @@ export async function POST(request: Request) {
       endFrameLeonardoId: null,
       audioReferenceLeonardoId: audioId,
       voiceoverUrl: null,
-      voiceoverGenerationId: tts.generationId,
+      voiceoverGenerationId: ttsGenerationId,
       voiceoverLanguage: languageCodeFor(language),
-      voiceoverVoiceId: voiceKey,
+      voiceoverVoiceId: audioMode === "tts" ? voiceKey : null,
       durationSeconds: duration,
       aspectRatio: aspectRatioInput,
       width: spec.aspectRatioSizes[aspectRatioInput].width,
@@ -157,8 +166,9 @@ export async function POST(request: Request) {
         width: spec.aspectRatioSizes[aspectRatioInput].width,
         height: spec.aspectRatioSizes[aspectRatioInput].height,
         withAudio: true,
-        imageReference: { id: frameId, type: "UPLOADED" },
-        audioReference: { id: audioId, type: "GENERATED" },
+        startFrame: audioMode === "native" ? { id: frameId, type: "UPLOADED" } : null,
+        imageReference: audioMode === "tts" ? { id: frameId, type: "UPLOADED" } : null,
+        audioReference: audioId ? { id: audioId, type: "GENERATED" } : null,
       });
 
       if (clip) {

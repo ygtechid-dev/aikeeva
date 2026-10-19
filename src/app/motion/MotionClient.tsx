@@ -73,6 +73,7 @@ export default function MotionClient() {
   const [duration, setDuration] = useState(5);
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [script, setScript] = useState("");
+  const [audioMode, setAudioMode] = useState<"native" | "tts">("native");
   const [language, setLanguage] = useState(VOICE_LANGUAGES[0]);
   const [voice, setVoice] = useState("george");
   const [photo, setPhoto] = useState<{ name: string; url: string; file?: File } | null>(null);
@@ -149,6 +150,7 @@ export default function MotionClient() {
       form.append("script", script);
       form.append("duration", String(activeDuration));
       form.append("aspectRatio", aspectRatio);
+      form.append("audioMode", audioMode);
       form.append("language", language);
       form.append("voice", voice);
       if (photo?.file) {
@@ -193,7 +195,7 @@ export default function MotionClient() {
           {phase === "input" && (
             <div className="card-soft rounded-2xl p-7">
               <h1 className="text-2xl font-bold">
-                Motion Control: <span className="grad-text">Foto Ngomong</span>
+                Motion Control: <span className="grad-text">Bikin Foto Bicara</span>
               </h1>
               <p className="mt-2 text-sm text-muted">
                 Upload 1 foto wajah, tulis teks ucapan — AI membuat foto itu berbicara
@@ -270,6 +272,41 @@ export default function MotionClient() {
                 </p>
               </div>
 
+              {/* Sumber suara */}
+              <div className="mt-6">
+                <label className="text-sm font-semibold">3. Sumber suara</label>
+                <div className="mt-2 grid sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAudioMode("native")}
+                    className={`text-left rounded-xl border p-3 transition-colors ${
+                      audioMode === "native"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">🎤 Suara model video</span>
+                    <span className="block text-xs text-muted">
+                      Model video yang bikin suaranya sendiri — hemat, tanpa biaya tambahan
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAudioMode("tts")}
+                    className={`text-left rounded-xl border p-3 transition-colors ${
+                      audioMode === "tts"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">🗣️ Suara AI presisi (TTS)</span>
+                    <span className="block text-xs text-muted">
+                      Teks → suara AI → lip-sync lebih akurat · +biaya TTS
+                    </span>
+                  </button>
+                </div>
+              </div>
+
               {/* Suara & bahasa */}
               <div className="mt-6 grid sm:grid-cols-2 gap-4">
                 <div>
@@ -287,23 +324,25 @@ export default function MotionClient() {
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label htmlFor="talk-voice" className="text-sm font-semibold">
-                    Suara AI
-                  </label>
-                  <select
-                    id="talk-voice"
-                    value={voice}
-                    onChange={(e) => setVoice(e.target.value)}
-                    className="mt-2 w-full rounded-xl bg-background border border-border px-3 py-2.5 text-sm outline-none focus:border-primary"
-                  >
-                    {TTS_VOICES.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name} ({v.gender}) — {v.tone}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {audioMode === "tts" && (
+                  <div>
+                    <label htmlFor="talk-voice" className="text-sm font-semibold">
+                      Suara AI
+                    </label>
+                    <select
+                      id="talk-voice"
+                      value={voice}
+                      onChange={(e) => setVoice(e.target.value)}
+                      className="mt-2 w-full rounded-xl bg-background border border-border px-3 py-2.5 text-sm outline-none focus:border-primary"
+                    >
+                      {TTS_VOICES.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name} ({v.gender}) — {v.tone}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Model + format */}
@@ -375,14 +414,16 @@ export default function MotionClient() {
                 disabled={!photo?.file || !script.trim() || loading}
                 className="mt-8 w-full btn-primary text-white font-semibold py-3.5 rounded-xl disabled:opacity-40 disabled:pointer-events-none"
               >
-                {loading ? "🗣️ Membuat suara & merender..." : "🎬 Generate Foto Ngomong"}
+                {loading ? "🗣️ Membuat suara & merender..." : "🎬 Generate Motion Control"}
               </button>
               <p className="mt-2 text-center text-[10px] text-muted">
                 {!photo?.file
                   ? "Upload foto wajah dulu"
-                  : !script.trim()
-                    ? "Isi teks ucapan dulu"
-                    : "Teks → suara AI → video lip-sync"}
+                    : !script.trim()
+                      ? "Isi teks ucapan dulu"
+                      : audioMode === "tts"
+                        ? "Teks → suara AI (TTS) → video lip-sync presisi"
+                        : "Teks masuk prompt → model video bikin suara sendiri"}
               </p>
             </div>
           )}
@@ -463,7 +504,7 @@ export default function MotionClient() {
             <dl className="mt-4 space-y-3 text-sm">
               <div className="flex justify-between">
                 <dt className="text-muted">Mode</dt>
-                <dd>Foto Ngomong</dd>
+                <dd>Motion Control</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted">Model</dt>
@@ -478,12 +519,20 @@ export default function MotionClient() {
                 <dd>{aspectRatio}</dd>
               </div>
               <div className="flex justify-between">
+                <dt className="text-muted">Sumber suara</dt>
+                <dd>{audioMode === "tts" ? "TTS presisi" : "Model video"}</dd>
+              </div>
+              <div className="flex justify-between">
                 <dt className="text-muted">Bahasa</dt>
                 <dd className="text-right">{language}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted">Suara</dt>
-                <dd>{TTS_VOICES.find((v) => v.id === voice)?.name ?? "—"}</dd>
+                <dd>
+                  {audioMode === "tts"
+                    ? (TTS_VOICES.find((v) => v.id === voice)?.name ?? "—")
+                    : "dari model video"}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted">Foto wajah</dt>
@@ -504,7 +553,7 @@ export default function MotionClient() {
 
           <div className="card-soft rounded-2xl p-6">
             <h3 className="font-bold text-sm uppercase tracking-wider text-muted">
-              💡 Tips foto ngomong
+              💡 Tips Motion Control
             </h3>
             <ul className="mt-3 space-y-2 text-sm text-muted list-disc list-inside">
               <li>Pakai foto wajah jelas, menghadap kamera, pencahayaan cukup</li>

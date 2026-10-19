@@ -65,9 +65,29 @@ function extractError(body: unknown): string | null {
     return null;
   }
   const record = body as Record<string, unknown>;
+
+  // GraphQL error: extensions.details.errors[].message / extensions.details.message
+  const extensions = record.extensions as Record<string, unknown> | undefined;
+  const details = extensions?.details as Record<string, unknown> | undefined;
+  if (details) {
+    const inner = details.errors;
+    if (Array.isArray(inner) && inner.length > 0) {
+      const messages = inner
+        .map((item) => {
+          const r = item as Record<string, unknown>;
+          return typeof r.message === "string" ? r.message : null;
+        })
+        .filter(Boolean);
+      if (messages.length > 0) return messages.join("; ");
+    }
+    if (typeof details.message === "string" && details.message.trim()) {
+      return details.message;
+    }
+  }
+
   for (const key of ["error", "message", "detail"]) {
     const value = record[key];
-    if (typeof value === "string" && value.trim()) {
+    if (typeof value === "string" && value.trim() && value.trim() !== "An error occurred.") {
       return value;
     }
   }
@@ -184,7 +204,12 @@ export async function createVideoGeneration(input: CreateGenerationInput): Promi
   const job = raw.generate;
   const generationId = job?.generationId ?? raw.sdGenerationJob?.generationId;
   if (!generationId) {
-    throw new LeonardoError("Leonardo tidak mengembalikan generationId.", 502, raw);
+    const detail = extractError(raw);
+    throw new LeonardoError(
+      detail ? `Leonardo menolak permintaan: ${detail}` : "Leonardo tidak mengembalikan generationId.",
+      502,
+      raw
+    );
   }
 
   return {
@@ -240,7 +265,12 @@ export async function createAudioGeneration(input: {
 
   const job = raw.generate;
   if (!job?.generationId) {
-    throw new LeonardoError("Leonardo tidak mengembalikan generationId untuk voiceover.", 502, raw);
+    const detail = extractError(raw);
+    throw new LeonardoError(
+      detail ? `Leonardo menolak voiceover: ${detail}` : "Leonardo tidak mengembalikan generationId untuk voiceover.",
+      502,
+      raw
+    );
   }
 
   return {

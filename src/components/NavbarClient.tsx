@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type NavUser = { name: string; email: string } | null;
 
@@ -10,6 +10,19 @@ export default function Navbar({ user }: { user: NavUser }) {
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const createRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!createOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (createRef.current && !createRef.current.contains(e.target as Node)) {
+        setCreateOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [createOpen]);
 
   const link = (href: string, label: string) => (
     <Link
@@ -62,12 +75,40 @@ export default function Navbar({ user }: { user: NavUser }) {
               >
                 {loggingOut ? "Keluar..." : "Keluar"}
               </button>
-              <Link
-                href="/generator"
-                className="btn-primary text-white text-sm font-semibold px-4 py-2 rounded-lg"
-              >
-                Buat Video →
-              </Link>
+              <div ref={createRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen((o) => !o)}
+                  aria-expanded={createOpen}
+                  className="btn-primary text-white text-sm font-semibold px-4 py-2 rounded-lg"
+                >
+                  Buat Video {createOpen ? "▴" : "→"}
+                </button>
+                {createOpen && (
+                  <div className="absolute right-0 mt-2 w-64 rounded-xl border border-border bg-card shadow-lg p-2 z-50">
+                    <Link
+                      href="/generator"
+                      onClick={() => setCreateOpen(false)}
+                      className="block rounded-lg px-3 py-2.5 hover:bg-primary/10"
+                    >
+                      <span className="block text-sm font-semibold">🎬 Video Iklan</span>
+                      <span className="block text-xs text-muted">
+                        Skenario AI, voiceover, musik — video iklan lengkap
+                      </span>
+                    </Link>
+                    <Link
+                      href="/motion"
+                      onClick={() => setCreateOpen(false)}
+                      className="block rounded-lg px-3 py-2.5 hover:bg-primary/10"
+                    >
+                      <span className="block text-sm font-semibold">🎙️ Motion Control</span>
+                      <span className="block text-xs text-muted">
+                        Satu foto bicara dengan suara AI (lip-sync)
+                      </span>
+                    </Link>
+                  </div>
+                )}
+              </div>
             </>
           ) : (
             <>

@@ -19,10 +19,12 @@ export type GenerationOptions = {
   voiceSpeed?: number;
   voiceLanguage?: string;
   voiceFileName?: string;
-  /** "talk" = foto ngomong (lip-sync), "standard" = iklan biasa. */
+  /** "talk" = motion control (lip-sync), "standard" = iklan biasa. */
   motionMode?: "talk" | "standard";
   /** Teks yang diucapkan saat motionMode = talk (akan dibuat TTS untuk lip-sync). */
   talkScript?: string;
+  /** "native" = suara dari model video (hemat), "tts" = suara AI presisi via audio_reference. */
+  audioMode?: "native" | "tts";
 };
 
 export type UnsupportedFeature = {
@@ -177,24 +179,31 @@ export function compilePrompt(input: CompileInput): CompiledPrompt {
 
   if (isTalk) {
     const script = sanitize(options.talkScript ?? "");
+    const tts = options.audioMode === "tts";
     sections.push(
       "Motion: a single portrait subject speaks naturally to camera with realistic lip movement synced to the spoken audio. Subtle head motion, natural blinks, and small facial expressions. No walking, no scene change."
     );
     if (script) {
       sections.push(`Spoken line: "${script}"`);
     }
+    if (!tts) {
+      const language = options.voiceLanguage ?? "Bahasa Indonesia";
+      sections.push(
+        `Audio: the subject speaks the spoken line above out loud in ${language} with their own voice, clear audible dialogue and natural lip sync. No background music.`
+      );
+    }
     sections.push(`Brief: ${sanitizeVisual(input.userPrompt)}`);
-    if (!spec.supportsAudioReference) {
+    if (tts && !spec.supportsAudioReference) {
       unsupported.push({
         feature: "motion_mode_talk",
-        reason: `${spec.label} tidak mendukung audio_reference untuk lip-sync; teks ucapan ditulis ke prompt dan model men-generate audio sendiri.`,
+        reason: `${spec.label} tidak mendukung audio_reference untuk suara TTS; teks ucapan ditulis ke prompt dan model men-generate audio sendiri.`,
         payload: { motionMode: "talk", talkScript: script || null },
       });
     }
     if (input.clipCount && input.clipCount > 1) {
       unsupported.push({
         feature: "motion_mode_talk_multi_clip",
-        reason: "Mode Foto Ngomong ideal untuk satu klip; klip lanjutan akan tetap menggunakan start frame wajah.",
+        reason: "Mode Motion Control ideal untuk satu klip; klip lanjutan akan tetap menggunakan start frame wajah.",
         payload: { clipCount: input.clipCount },
       });
     }
