@@ -19,7 +19,16 @@ export type GenerationOptions = {
   voiceSpeed?: number;
   voiceLanguage?: string;
   voiceFileName?: string;
+  /** "talk" = foto ngomong (lip-sync), "standard" = iklan biasa. */
+  motionMode?: "talk" | "standard";
+  /** Teks yang diucapkan saat motionMode = talk (akan dibuat TTS untuk lip-sync). */
+  talkScript?: string;
 };
+
+export const MOTION_MODES = [
+  { id: "standard", label: "Iklan Standar" },
+  { id: "talk", label: "Foto Ngomong" },
+] as const;
 
 export type UnsupportedFeature = {
   feature: string;
@@ -154,6 +163,7 @@ export function compilePrompt(input: CompileInput): CompiledPrompt {
   const unsupported: UnsupportedFeature[] = [];
   const sections: string[] = [];
   const options = input.options;
+  const isTalk = options.motionMode === "talk";
 
   const style = options.style ? STYLE_DIRECTIVES[options.style] ?? options.style : "";
   const part =
@@ -163,12 +173,40 @@ export function compilePrompt(input: CompileInput): CompiledPrompt {
 
   sections.push(
     sanitize(
-      `A ${input.duration} second commercial shot in ${input.aspectRatio} framing.` +
+      `A ${input.duration} second ${isTalk ? "talking portrait" : "commercial"} shot in ${input.aspectRatio} framing.` +
         (style ? ` Camera and look: ${style}.` : "") +
         part
     )
   );
   sections.push(REALISM_DIRECTIVE);
+
+  if (isTalk) {
+    const script = sanitize(options.talkScript ?? "");
+    sections.push(
+      "Motion: a single portrait subject speaks naturally to camera with realistic lip movement synced to the spoken audio. Subtle head motion, natural blinks, and small facial expressions. No walking, no scene change."
+    );
+    if (script) {
+      sections.push(`Spoken line: "${script}"`);
+    }
+    sections.push(`Brief: ${sanitizeVisual(input.userPrompt)}`);
+    if (!spec.supportsAudioReference) {
+      unsupported.push({
+        feature: "motion_mode_talk",
+        reason: `${spec.label} tidak mendukung audio_reference untuk lip-sync; teks ucapan ditulis ke prompt dan model men-generate audio sendiri.`,
+        payload: { motionMode: "talk", talkScript: script || null },
+      });
+    }
+    if (input.clipCount && input.clipCount > 1) {
+      unsupported.push({
+        feature: "motion_mode_talk_multi_clip",
+        reason: "Mode Foto Ngomong ideal untuk satu klip; klip lanjutan akan tetap menggunakan start frame wajah.",
+        payload: { clipCount: input.clipCount },
+      });
+    }
+    const limit = Math.min(spec.maxPromptLength, MAX_PROMPT_LENGTH);
+    const prompt = sections.join("\n").slice(0, limit);
+    return { prompt, negativePrompt: null, unsupportedFeatures: unsupported };
+  }
 
   const scenes = input.scenes.filter((scene) => sanitize(scene.visual).length > 0);
   const narrationLines = scenes

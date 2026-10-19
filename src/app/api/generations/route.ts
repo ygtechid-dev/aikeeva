@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/api/auth";
 import { ApiError, jsonError, jsonOk, toGenerationDto } from "@/lib/api/http";
-import { uploadImageFile } from "@/lib/api/uploads";
+import { uploadAudioFile, uploadImageFile } from "@/lib/api/uploads";
 import { createClips, listClips, updateClip } from "@/lib/generation/clips";
 import { clipDuration, planClips } from "@/lib/generation/plan";
 import { languageCodeFor } from "@/lib/generation/language";
@@ -106,8 +106,12 @@ export async function POST(request: Request) {
     const scenes = parseScenes(form.get("scenes") as string | null);
     const options = parseOptions(form.get("options") as string | null);
 
+    const motionMode = options.motionMode === "talk" ? "talk" : "standard";
+    options.motionMode = motionMode;
+
     const startFrameFile = form.get("startFrame");
     const endFrameFile = form.get("endFrame");
+    const talkAudioFile = form.get("talkAudio");
 
     const startFrameId =
       startFrameFile instanceof File && startFrameFile.size > 0
@@ -117,6 +121,21 @@ export async function POST(request: Request) {
       spec.supportsEndFrame && endFrameFile instanceof File && endFrameFile.size > 0
         ? await uploadImageFile(endFrameFile, "end frame")
         : null;
+
+    if (motionMode === "talk" && !startFrameId) {
+      throw new ApiError("Mode Foto Ngomong wajib upload satu foto wajah sebagai start frame.", 400);
+    }
+
+    let talkAudioId: string | null = null;
+    if (motionMode === "talk" && talkAudioFile instanceof File && talkAudioFile.size > 0) {
+      if (!spec.supportsAudioReference) {
+        throw new ApiError(
+          `${spec.label} tidak mendukung audio_reference. Pilih model lain untuk mode Foto Ngomong.`,
+          400
+        );
+      }
+      talkAudioId = await uploadAudioFile(talkAudioFile, "talk audio");
+    }
 
     const { width, height } = spec.aspectRatioSizes[aspectRatioInput];
     const plans = planClips(scenes, requestedDuration, spec.clipDuration);
@@ -153,7 +172,7 @@ export async function POST(request: Request) {
       unsupportedFeatures: mergedFeatures,
       startFrameLeonardoId: startFrameId,
       endFrameLeonardoId: endFrameId,
-      audioReferenceLeonardoId: null,
+      audioReferenceLeonardoId: talkAudioId,
       voiceoverUrl: null,
       voiceoverGenerationId: null,
       voiceoverLanguage: options.voiceEnabled ? languageCodeFor(options.voiceLanguage) : null,
@@ -187,6 +206,11 @@ export async function POST(request: Request) {
 
     for (const clip of clips) {
       try {
+        const isTalkClip = motionMode === "talk" && clip.clipIndex === 0;
+        const audioRef =
+          isTalkClip && talkAudioId && spec.supportsAudioReference
+            ? { id: talkAudioId, type: "UPLOADED" as const }
+            : null;
         const result = await createVideoGeneration({
           model,
           prompt: clip.compiledPrompt,
@@ -200,6 +224,8 @@ export async function POST(request: Request) {
             clip.clipIndex === clips.length - 1 && endFrameId
               ? { id: endFrameId, type: "UPLOADED" }
               : null,
+          audioReference: audioRef,
+          imageReference: isTalkClip && startFrameId ? { id: startFrameId, type: "UPLOADED" } : null,
         });
 
         await updateClip(clip.id, {

@@ -89,6 +89,7 @@ export type CreateGenerationInput = {
   startFrame?: LeonardoImageRef | null;
   endFrame?: LeonardoImageRef | null;
   audioReference?: LeonardoAudioRef | null;
+  imageReference?: LeonardoImageRef | null;
 };
 
 export type CreateGenerationResult = {
@@ -157,6 +158,9 @@ export async function createVideoGeneration(input: CreateGenerationInput): Promi
   }
   if (input.endFrame) {
     guidances.end_frame = [{ image: input.endFrame }];
+  }
+  if (input.imageReference) {
+    guidances.image_reference = [{ image: input.imageReference }];
   }
   if (input.audioReference) {
     guidances.audio_reference = [{ audio: input.audioReference }];
@@ -242,7 +246,11 @@ export async function createAudioGeneration(input: {
 
 export type UploadResult = { id: string };
 
-export async function uploadAsset(buffer: Buffer, extension: "jpg" | "png" | "webp", mimeType: string) {
+export async function uploadAsset(
+  buffer: Buffer,
+  extension: "jpg" | "png" | "webp",
+  mimeType: string
+) {
   const init = await request<{
     uploadInitImage?: { id?: string; url?: string; fields?: string };
   }>("/v1/init-image", {
@@ -266,6 +274,37 @@ export async function uploadAsset(buffer: Buffer, extension: "jpg" | "png" | "we
   const uploadResponse = await fetch(upload.url, { method: "POST", body: form });
   if (!uploadResponse.ok) {
     throw new LeonardoError(`Upload ke storage Leonardo gagal (${uploadResponse.status}).`, 502);
+  }
+
+  return { id: upload.id } satisfies UploadResult;
+}
+
+/** Upload audio untuk audio_reference (Hailuo 03 / Seedance / Wan). */
+export async function uploadAudioAsset(buffer: Buffer, extension: string, mimeType: string) {
+  const init = await request<{
+    uploadInitAudio?: { id?: string; url?: string; fields?: string };
+    uploadInitImage?: { id?: string; url?: string; fields?: string };
+  }>("/v1/init-audio", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ extension }),
+  });
+
+  const upload = init.uploadInitAudio ?? init.uploadInitImage;
+  if (!upload?.id || !upload.url) {
+    throw new LeonardoError("Gagal mendapatkan presigned URL untuk upload audio.", 502, init);
+  }
+
+  const fields = upload.fields ? (JSON.parse(upload.fields) as Record<string, string>) : {};
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) {
+    form.append(key, value);
+  }
+  form.append("file", new Blob([new Uint8Array(buffer)], { type: mimeType }), `upload.${extension}`);
+
+  const uploadResponse = await fetch(upload.url, { method: "POST", body: form });
+  if (!uploadResponse.ok) {
+    throw new LeonardoError(`Upload audio ke storage Leonardo gagal (${uploadResponse.status}).`, 502);
   }
 
   return { id: upload.id } satisfies UploadResult;

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { TEMPLATES, VOICES, VOICE_LANGUAGES, BGM_OPTIONS } from "@/lib/templates";
+import { MOTION_MODES } from "@/lib/generation/prompt";
 import ImageUpload, { type RefImage } from "@/components/ImageUpload";
 
 type Scene = {
@@ -150,6 +151,10 @@ function GeneratorInner() {
   const [voiceSpeed, setVoiceSpeed] = useState(100);
   const [bgm, setBgm] = useState("upbeat");
   const [voiceFile, setVoiceFile] = useState<{ name: string; url: string; file?: File } | null>(null);
+  const [motionMode, setMotionMode] = useState<"talk" | "standard">("standard");
+  const [talkScript, setTalkScript] = useState("");
+  const [talkAudioFile, setTalkAudioFile] = useState<{ name: string; url: string; file?: File } | null>(null);
+  const talkAudioRef = useRef<HTMLInputElement>(null);
   const [recording, setRecording] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
   const [generation, setGeneration] = useState<GenerationDto | null>(null);
@@ -231,12 +236,18 @@ function GeneratorInner() {
           voiceSpeed,
           voiceLanguage: voiceLang,
           voiceFileName: voiceFile?.name,
+          motionMode,
+          talkScript: motionMode === "talk" ? talkScript : undefined,
         })
       );
 
       const reference = characterImages[0]?.file ?? moodImages[0]?.file;
       if (reference) {
         form.append("startFrame", reference, reference.name);
+      }
+
+      if (motionMode === "talk" && talkAudioFile?.file) {
+        form.append("talkAudio", talkAudioFile.file, talkAudioFile.file.name);
       }
 
       const response = await fetch("/api/generations", { method: "POST", body: form });
@@ -335,6 +346,22 @@ function GeneratorInner() {
     setRecordError(null);
   };
 
+  const setTalkAudioFromFile = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("audio/")) {
+      setRecordError(`"${file.name}" bukan file audio.`);
+      return;
+    }
+    setRecordError(null);
+    if (talkAudioFile) URL.revokeObjectURL(talkAudioFile.url);
+    setTalkAudioFile({ name: file.name, url: URL.createObjectURL(file), file });
+  };
+
+  const clearTalkAudioFile = () => {
+    if (talkAudioFile) URL.revokeObjectURL(talkAudioFile.url);
+    setTalkAudioFile(null);
+  };
+
   return (
     <div className="mx-auto max-w-7xl px-6 py-12">
       {/* Stepper */}
@@ -418,6 +445,99 @@ function GeneratorInner() {
                     onChange={setCharacterImages}
                   />
                 </div>
+              </div>
+
+              {/* Motion Control */}
+              <div className="mt-7 pt-6 border-t border-border">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="font-bold">Motion Control</h2>
+                    <p className="mt-1 text-xs text-muted">
+                      Pilih mode gerakan. <b>Foto Ngomong</b> membuat foto wajah berbicara dengan lip-sync.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid sm:grid-cols-2 gap-2 p-1 rounded-xl bg-gray-100">
+                  {MOTION_MODES.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setMotionMode(m.id)}
+                      className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
+                        motionMode === m.id
+                          ? "bg-card shadow-sm text-foreground"
+                          : "text-muted hover:text-foreground"
+                      }`}
+                    >
+                      {m.id === "talk" ? "🎙️" : "🎬"} {m.label}
+                    </button>
+                  ))}
+                </div>
+
+                {motionMode === "talk" && (
+                  <div className="mt-4 space-y-4 rounded-xl border border-primary/30 bg-primary/5 p-4">
+                    <p className="text-xs text-muted">
+                      Mode <b>Foto Ngomong</b> aktif. Upload <b>satu foto wajah</b> di kolom
+                      &ldquo;Karakter / Model&rdquo; di atas, lalu isi teks ucapan atau upload audio di bawah.
+                      Hanya klip pertama (5 detik) yang dipakai untuk lip-sync.
+                    </p>
+
+                    <div>
+                      <label className="text-sm font-semibold">Teks ucapan</label>
+                      <textarea
+                        value={talkScript}
+                        onChange={(e) => setTalkScript(e.target.value)}
+                        rows={3}
+                        placeholder="Contoh: Halo semua, hari ini aku mau kasih tau produk favoritku..."
+                        className="mt-2 w-full rounded-xl bg-background border border-border p-3 text-sm outline-none focus:border-primary resize-none placeholder:text-muted"
+                      />
+                      <p className="mt-1 text-xs text-muted">
+                        Teks ini dipakai model untuk menggerakkan mulut. Jika upload audio, teks diabaikan.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-semibold">Audio ucapan (opsional)</label>
+                      <div className="mt-2 rounded-xl border border-dashed border-border p-4 text-center">
+                        <div className="text-2xl">🗣️</div>
+                        <p className="mt-1 text-xs text-muted">
+                          Upload audio sendiri untuk lip-sync yang lebih akurat
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => talkAudioRef.current?.click()}
+                          className="mt-3 text-xs font-semibold text-primary border border-border rounded-lg px-3 py-2 bg-card"
+                        >
+                          📁 Pilih Audio Ucapan
+                        </button>
+                        <p className="mt-2 text-[10px] text-muted">MP3 / WAV / M4A · maks 25MB · ≤ 15 detik</p>
+                      </div>
+
+                      {talkAudioFile && (
+                        <div className="mt-2 rounded-xl border border-border p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-xs truncate">🎧 {talkAudioFile.name}</span>
+                            <button
+                              type="button"
+                              onClick={clearTalkAudioFile}
+                              className="text-xs font-semibold text-red-600 shrink-0"
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                          <audio src={talkAudioFile.url} controls className="mt-2 w-full h-9" />
+                        </div>
+                      )}
+                    </div>
+
+                    {(characterImages.length === 0 && moodImages.length === 0) && (
+                      <p className="text-xs text-red-600">
+                        ⚠️ Wajib upload minimal 1 foto wajah di &ldquo;Karakter / Model&rdquo;.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Voiceover */}
@@ -652,6 +772,16 @@ function GeneratorInner() {
                   className="hidden"
                   onChange={(e) => {
                     setVoiceFromFile(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <input
+                  ref={talkAudioRef}
+                  type="file"
+                  accept="audio/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    setTalkAudioFromFile(e.target.files?.[0]);
                     e.target.value = "";
                   }}
                 />
@@ -972,6 +1102,12 @@ function GeneratorInner() {
               <div className="flex justify-between">
                 <dt className="text-muted">Gaya</dt>
                 <dd>{style}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-muted">Motion</dt>
+                <dd>
+                  {motionMode === "talk" ? "Foto Ngomong" : "Iklan Standar"}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted">Format</dt>
