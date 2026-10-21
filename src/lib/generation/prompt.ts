@@ -180,19 +180,28 @@ export function compilePrompt(input: CompileInput): CompiledPrompt {
   if (isTalk) {
     const script = sanitize(options.talkScript ?? "");
     const tts = options.audioMode === "tts";
+    const scene = sanitizeVisual(input.userPrompt);
+    if (scene) {
+      sections.push(`Scene: ${scene}`);
+    }
     sections.push(
-      "Motion: a single portrait subject speaks naturally to camera with realistic lip movement synced to the spoken audio. Subtle head motion, natural blinks, and small facial expressions. No walking, no scene change."
+      script
+        ? "Motion: the subject performs the scene above with natural body movement and facial expressions, and speaks with realistic lip movement synced to the spoken audio. Subtle head motion and natural blinks."
+        : "Motion: the subject performs the scene above with natural body movement, subtle head motion, and natural blinks. The subject does not speak."
     );
     if (script) {
       sections.push(`Spoken line: "${script}"`);
-    }
-    if (!tts) {
-      const language = options.voiceLanguage ?? "Bahasa Indonesia";
+      if (!tts) {
+        const language = options.voiceLanguage ?? "Bahasa Indonesia";
+        sections.push(
+          `Audio: the subject speaks the spoken line above out loud in ${language} with their own voice, clear audible dialogue and natural lip sync. No background music.`
+        );
+      }
+    } else if (!tts) {
       sections.push(
-        `Audio: the subject speaks the spoken line above out loud in ${language} with their own voice, clear audible dialogue and natural lip sync. No background music.`
+        "Audio: ambient sound only matching the scene. No dialogue, no voice-over, the subject keeps their mouth closed."
       );
     }
-    sections.push(`Brief: ${sanitizeVisual(input.userPrompt)}`);
     if (tts && !spec.supportsAudioReference) {
       unsupported.push({
         feature: "motion_mode_talk",

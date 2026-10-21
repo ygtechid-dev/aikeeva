@@ -90,6 +90,7 @@ export default function MotionClient() {
   const [duration, setDuration] = useState(5);
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [script, setScript] = useState("");
+  const [scene, setScene] = useState("");
   const [audioMode, setAudioMode] = useState<"native" | "tts">("native");
   const [language, setLanguage] = useState(VOICE_LANGUAGES[0]);
   const [voice, setVoice] = useState("george");
@@ -176,6 +177,7 @@ export default function MotionClient() {
     try {
       const form = new FormData();
       form.append("model", modelId);
+      form.append("scene", scene);
       form.append("script", script);
       form.append("duration", String(activeDuration));
       form.append("aspectRatio", aspectRatio);
@@ -240,7 +242,7 @@ export default function MotionClient() {
                   className="mt-2 w-full rounded-xl border-2 border-dashed border-border p-5 text-center transition-colors hover:border-primary/60 hover:bg-primary/5"
                 >
                   <div className="text-2xl">🙂</div>
-                  <p className="mt-1 text-sm font-semibold">Upload foto wajah yang akan bicara</p>
+                  <p className="mt-1 text-sm font-semibold">Upload foto orang yang akan dibuat bergerak</p>
                   <span className="mt-3 inline-block text-xs font-semibold text-primary border border-border rounded-lg px-3 py-1.5">
                     Pilih Foto
                   </span>
@@ -278,11 +280,35 @@ export default function MotionClient() {
                 )}
               </div>
 
-              {/* Teks ucapan */}
+              {/* Deskripsi adegan */}
               <div className="mt-6">
                 <div className="flex justify-between text-sm">
+                  <label htmlFor="talk-scene" className="font-semibold">
+                    2. Deskripsi adegan <span className="text-red-500">*</span>
+                  </label>
+                  <span className="font-mono text-accent">{scene.length}/1000</span>
+                </div>
+                <textarea
+                  id="talk-scene"
+                  value={scene}
+                  onChange={(e) => setScene(e.target.value)}
+                  rows={3}
+                  maxLength={1000}
+                  placeholder="Contoh: orang di foto berdiri, memegang shampo, lalu mempromosikan produk ke kamera..."
+                  className="mt-2 w-full rounded-xl bg-background border border-border p-4 text-sm outline-none focus:border-primary resize-none placeholder:text-muted"
+                />
+                <p className="mt-1 text-xs text-muted">
+                  Apa yang <b>terjadi / dilakukan</b> orang di foto — gerakan, aksi, suasana.
+                  Kolom ini <b>bukan</b> untuk kalimat yang diucapkan.
+                </p>
+              </div>
+
+              {/* Kalimat ucapan (opsional) */}
+              <div className="mt-5">
+                <div className="flex justify-between text-sm">
                   <label htmlFor="talk-script" className="font-semibold">
-                    2. Teks ucapan
+                    3. Kalimat yang diucapkan{" "}
+                    <span className="text-muted font-normal">(opsional)</span>
                   </label>
                   <span className="font-mono text-accent">{script.length}/1000</span>
                 </div>
@@ -290,20 +316,21 @@ export default function MotionClient() {
                   id="talk-script"
                   value={script}
                   onChange={(e) => setScript(e.target.value)}
-                  rows={4}
+                  rows={3}
                   maxLength={1000}
-                  placeholder="Contoh: Halo semuanya! Hari ini aku mau kenalin produk terbaru yang bikin hariku lebih mudah..."
+                  placeholder="Contoh: Halo semuanya! Yuk cobain shampo ini, wangi dan bikin rambut sehat..."
                   className="mt-2 w-full rounded-xl bg-background border border-border p-4 text-sm outline-none focus:border-primary resize-none placeholder:text-muted"
                 />
                 <p className="mt-1 text-xs text-muted">
-                  💡 Sesuaikan panjang teks dengan durasi video ({activeDuration}s ≈ {activeDuration * 4} kata).
-                  Suara AI dibuat otomatis dari teks ini.
+                  Kalimat yang <b>dibicarakan</b> orang di foto. Kalau dikosongkan, video tanpa
+                  dialog (suara model video hanya efek suasana). Wajib diisi kalau pilih TTS.
+                  💡 Panjang teks ≈ durasi ({activeDuration}s ≈ {activeDuration * 4} kata).
                 </p>
               </div>
 
               {/* Sumber suara */}
               <div className="mt-6">
-                <label className="text-sm font-semibold">3. Sumber suara</label>
+                <label className="text-sm font-semibold">4. Sumber suara</label>
                 <div className="mt-2 grid sm:grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -454,19 +481,28 @@ export default function MotionClient() {
 
               <button
                 onClick={generate}
-                disabled={!photo?.file || !script.trim() || loading}
+                disabled={
+                  !photo?.file ||
+                  !scene.trim() ||
+                  (audioMode === "tts" && !script.trim()) ||
+                  loading
+                }
                 className="mt-8 w-full btn-primary text-white font-semibold py-3.5 rounded-xl disabled:opacity-40 disabled:pointer-events-none"
               >
                 {loading ? "🗣️ Membuat suara & merender..." : "🎬 Generate Motion Control"}
               </button>
               <p className="mt-2 text-center text-[10px] text-muted">
                 {!photo?.file
-                  ? "Upload foto wajah dulu"
-                    : !script.trim()
-                      ? "Isi teks ucapan dulu"
+                  ? "Upload foto orang dulu"
+                  : !scene.trim()
+                    ? "Isi deskripsi adegan dulu"
+                    : audioMode === "tts" && !script.trim()
+                      ? "Mode TTS butuh kalimat yang diucapkan"
                       : audioMode === "tts"
-                        ? "Teks → suara AI (TTS) → video lip-sync presisi"
-                        : "Teks masuk prompt → model video bikin suara sendiri"}
+                        ? "Kalimat → suara AI (TTS) → video lip-sync presisi"
+                        : script.trim()
+                          ? "Adegan + kalimat masuk prompt → model video bikin suara sendiri"
+                          : "Adegan masuk prompt → tanpa dialog, suara suasana saja"}
               </p>
             </div>
           )}
@@ -578,18 +614,25 @@ export default function MotionClient() {
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-muted">Foto wajah</dt>
+                <dt className="text-muted">Foto</dt>
                 <dd>{photo ? "✓ terupload" : "belum ada"}</dd>
               </div>
               <div className="flex justify-between">
+                <dt className="text-muted">Adegan</dt>
+                <dd className="font-mono">{scene.length} karakter</dd>
+              </div>
+              <div className="flex justify-between">
                 <dt className="text-muted">Ucapan</dt>
-                <dd className="font-mono">{script.length} karakter</dd>
+                <dd className="font-mono">{script ? `${script.length} karakter` : "tanpa dialog"}</dd>
               </div>
             </dl>
 
-            <div className="mt-4 pt-4 border-t border-border">
+            <div className="mt-4 pt-4 border-t border-border space-y-2">
               <p className="text-xs text-muted line-clamp-3">
-                {script || "Belum ada teks ucapan."}
+                <b>Adegan:</b> {scene || "Belum ada deskripsi adegan."}
+              </p>
+              <p className="text-xs text-muted line-clamp-3">
+                <b>Ucapan:</b> {script || "Tanpa dialog."}
               </p>
             </div>
           </div>

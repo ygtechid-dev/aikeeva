@@ -77,10 +77,19 @@ export async function POST(request: Request) {
       throw new ApiError(`${spec.label} tidak mendukung start frame foto wajah.`, 400);
     }
 
+    const scene = String(form.get("scene") ?? "").trim();
     const script = String(form.get("script") ?? "").trim();
-    if (!script) throw new ApiError("Teks ucapan wajib diisi.", 400);
+    if (!scene) {
+      throw new ApiError("Deskripsi adegan wajib diisi (apa yang dilakukan orang di foto).", 400);
+    }
+    if (scene.length > MAX_SCRIPT_LENGTH) {
+      throw new ApiError(`Deskripsi adegan maksimal ${MAX_SCRIPT_LENGTH} karakter.`, 400);
+    }
     if (script.length > MAX_SCRIPT_LENGTH) {
-      throw new ApiError(`Teks ucapan maksimal ${MAX_SCRIPT_LENGTH} karakter.`, 400);
+      throw new ApiError(`Kalimat ucapan maksimal ${MAX_SCRIPT_LENGTH} karakter.`, 400);
+    }
+    if (audioMode === "tts" && !script) {
+      throw new ApiError("Mode suara TTS butuh kalimat yang diucapkan. Isi kolom ucapan atau pilih suara model video.", 400);
     }
 
     const aspectRatioInput = String(form.get("aspectRatio") ?? "9:16") as AspectRatio;
@@ -121,7 +130,7 @@ export async function POST(request: Request) {
       model,
       aspectRatio,
       duration,
-      userPrompt: script,
+      userPrompt: scene,
       scenes: [] as Scene[],
       options: { motionMode: "talk", talkScript: script, audioMode, voiceLanguage: language },
       hasEndFrame: false,
@@ -133,7 +142,7 @@ export async function POST(request: Request) {
       userId: user.id,
       providerGenerationId: null,
       model,
-      userPrompt: script,
+      userPrompt: scene,
       compiledPrompt: compiled.prompt,
       unsupportedFeatures: compiled.unsupportedFeatures,
       startFrameLeonardoId: frameId,
