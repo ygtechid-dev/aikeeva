@@ -23,6 +23,8 @@ type TalkModelOption = {
   label: string;
   description: string;
   durations: number[];
+  aspectRatios: string[];
+  supportsStartFrame: boolean;
   supportsAudioReference: boolean;
 };
 
@@ -32,13 +34,26 @@ const FALLBACK_MODELS: TalkModelOption[] = [
     label: "MiniMax Hailuo 03",
     description: "Gerakan natural dengan audio native & lip-sync terbaik.",
     durations: [5, 10, 15],
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    supportsStartFrame: true,
     supportsAudioReference: true,
+  },
+  {
+    id: "google/gemini-omni-1.1-flash-preview",
+    label: "Gemini Omni 1.1 Flash",
+    description: "Cepat & hemat, audio native, durasi 3–10 detik.",
+    durations: [5, 10],
+    aspectRatios: ["16:9", "9:16"],
+    supportsStartFrame: true,
+    supportsAudioReference: false,
   },
   {
     id: "wan-2.6",
     label: "Wan 2.6",
     description: "Alibaba Wan 2.6, mendukung referensi audio untuk lip-sync.",
     durations: [5, 10, 15],
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    supportsStartFrame: true,
     supportsAudioReference: true,
   },
   {
@@ -46,6 +61,8 @@ const FALLBACK_MODELS: TalkModelOption[] = [
     label: "Seedance 2.5",
     description: "Video hingga 30 detik, mendukung referensi audio.",
     durations: [5, 10, 15],
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    supportsStartFrame: true,
     supportsAudioReference: true,
   },
 ];
@@ -88,7 +105,7 @@ export default function MotionClient() {
     fetch("/api/models")
       .then((response) => (response.ok ? response.json() : null))
       .then((data: { models?: TalkModelOption[] } | null) => {
-        const supported = data?.models?.filter((m) => m.supportsAudioReference);
+        const supported = data?.models?.filter((m) => m.supportsStartFrame);
         if (!cancelled && supported?.length) {
           setModels(supported);
         }
@@ -102,6 +119,18 @@ export default function MotionClient() {
   const selectedModel = models.find((m) => m.id === modelId) ?? models[0];
   const durationOptions = TALK_DURATIONS.filter((d) => selectedModel.durations.includes(d));
   const activeDuration = durationOptions.includes(duration) ? duration : (durationOptions[0] ?? 5);
+  const ttsSupported = selectedModel.supportsAudioReference;
+
+  const handleModelChange = (nextId: string) => {
+    const next = models.find((m) => m.id === nextId) ?? models[0];
+    setModelId(next.id);
+    if (!next.aspectRatios.includes(aspectRatio)) {
+      setAspectRatio(next.aspectRatios[0] ?? "9:16");
+    }
+    if (!next.supportsAudioReference && audioMode === "tts") {
+      setAudioMode("native");
+    }
+  };
 
   const setPhotoFromFile = (file: File | undefined) => {
     if (!file) return;
@@ -293,15 +322,23 @@ export default function MotionClient() {
                   <button
                     type="button"
                     onClick={() => setAudioMode("tts")}
+                    disabled={!ttsSupported}
+                    title={
+                      ttsSupported
+                        ? undefined
+                        : `${selectedModel.label} tidak mendukung suara TTS`
+                    }
                     className={`text-left rounded-xl border p-3 transition-colors ${
                       audioMode === "tts"
                         ? "border-primary bg-primary/5"
                         : "border-border hover:border-primary/50"
-                    }`}
+                    } ${ttsSupported ? "" : "opacity-40 pointer-events-none"}`}
                   >
                     <span className="block text-sm font-semibold">🗣️ Suara AI presisi (TTS)</span>
                     <span className="block text-xs text-muted">
-                      Teks → suara AI → lip-sync lebih akurat · +biaya TTS
+                      {ttsSupported
+                        ? "Teks → suara AI → lip-sync lebih akurat · +biaya TTS"
+                        : `Tidak didukung ${selectedModel.label} — pakai model lain`}
                     </span>
                   </button>
                 </div>
@@ -354,7 +391,7 @@ export default function MotionClient() {
                   <select
                     id="talk-model"
                     value={modelId}
-                    onChange={(e) => setModelId(e.target.value)}
+                    onChange={(e) => handleModelChange(e.target.value)}
                     className="mt-2 w-full rounded-xl bg-background border border-border px-3 py-2.5 text-sm outline-none focus:border-primary"
                   >
                     {models.map((m) => (
@@ -375,9 +412,15 @@ export default function MotionClient() {
                     onChange={(e) => setAspectRatio(e.target.value)}
                     className="mt-2 w-full rounded-xl bg-background border border-border px-3 py-2.5 text-sm outline-none focus:border-primary"
                   >
-                    <option value="9:16">9:16 (Story / Reels)</option>
-                    <option value="16:9">16:9 (Landscape)</option>
-                    <option value="1:1">1:1 (Square)</option>
+                    {selectedModel.aspectRatios.map((r) => (
+                      <option key={r} value={r}>
+                        {r === "9:16"
+                          ? "9:16 (Story / Reels)"
+                          : r === "16:9"
+                            ? "16:9 (Landscape)"
+                            : "1:1 (Square)"}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

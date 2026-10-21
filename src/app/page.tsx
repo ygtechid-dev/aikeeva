@@ -1,4 +1,5 @@
 import Link from "next/link";
+import CreateCta from "@/components/CreateCta";
 import { TEMPLATES, TOKEN_PACKS, TOKEN_COSTS, formatIdr } from "@/lib/templates";
 
 export default function Home() {
@@ -22,12 +23,7 @@ export default function Home() {
             video generator merubahnya menjadi iklan siap tayang.
           </p>
           <div className="mt-10 flex items-center justify-center gap-4">
-            <Link
-              href="/generator"
-              className="btn-primary text-white font-semibold px-7 py-3.5 rounded-xl"
-            >
-              🎬 Buat Video Sekarang
-            </Link>
+            <CreateCta className="btn-primary text-white font-semibold px-7 py-3.5 rounded-xl" />
             <Link
               href="#templates"
               className="card-soft font-semibold px-7 py-3.5 rounded-xl transition-shadow"

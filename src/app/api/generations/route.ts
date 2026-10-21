@@ -13,6 +13,7 @@ import {
   MAX_TOTAL_DURATION,
   VIDEO_MODELS,
   isVideoModelId,
+  resolveAspectRatio,
   resolveVideoModel,
   type AspectRatio,
   type VideoModelId,
@@ -92,6 +93,7 @@ export async function POST(request: Request) {
     if (!ASPECT_RATIOS.includes(aspectRatioInput)) {
       throw new ApiError("Aspect ratio harus 16:9, 9:16, atau 1:1.", 400);
     }
+    const aspectRatio = resolveAspectRatio(spec, aspectRatioInput);
 
     const requestedDuration = Number(form.get("duration") ?? spec.clipDuration);
     if (!Number.isFinite(requestedDuration) || requestedDuration < spec.clipDuration) {
@@ -118,13 +120,13 @@ export async function POST(request: Request) {
         ? await uploadImageFile(endFrameFile, "end frame")
         : null;
 
-    const { width, height } = spec.aspectRatioSizes[aspectRatioInput];
+    const { width, height } = spec.aspectRatioSizes[aspectRatio] ?? { width: 1280, height: 720 };
     const plans = planClips(scenes, requestedDuration, spec.clipDuration);
 
     const compiledClips = plans.map((plan) => {
       const compiled = compilePrompt({
         model,
-        aspectRatio: aspectRatioInput,
+        aspectRatio,
         duration: clipDuration(plan),
         userPrompt: prompt,
         scenes: plan.scenes,
@@ -159,7 +161,7 @@ export async function POST(request: Request) {
       voiceoverLanguage: options.voiceEnabled ? languageCodeFor(options.voiceLanguage) : null,
       voiceoverVoiceId: options.voiceEnabled ? (options.voiceId ?? null) : null,
       durationSeconds: plans.length * spec.clipDuration,
-      aspectRatio: aspectRatioInput,
+      aspectRatio,
       width,
       height,
       withAudio,

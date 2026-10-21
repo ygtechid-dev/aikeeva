@@ -666,7 +666,13 @@ function GeneratorInner() {
                   <select
                     id="model"
                     value={modelId}
-                    onChange={(e) => setModelId(e.target.value)}
+                    onChange={(e) => {
+                      const next = models.find((m) => m.id === e.target.value) ?? selectedModel;
+                      setModelId(next.id);
+                      if (!next.aspectRatios.includes(aspectRatio)) {
+                        setAspectRatio(next.aspectRatios[0] ?? "16:9");
+                      }
+                    }}
                     className="mt-2 w-full rounded-xl bg-background border border-border px-3 py-2.5 text-sm outline-none focus:border-primary"
                   >
                     {models.map((m) => (

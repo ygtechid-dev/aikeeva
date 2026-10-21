@@ -14,6 +14,7 @@ import {
 import {
   VIDEO_MODELS,
   isVideoModelId,
+  resolveAspectRatio,
   resolveVideoModel,
   type AspectRatio,
   type VideoModelId,
@@ -86,6 +87,8 @@ export async function POST(request: Request) {
     if (!ASPECT_RATIOS.includes(aspectRatioInput)) {
       throw new ApiError("Aspect ratio harus 16:9, 9:16, atau 1:1.", 400);
     }
+    const aspectRatio = resolveAspectRatio(spec, aspectRatioInput);
+    const size = spec.aspectRatioSizes[aspectRatio] ?? { width: 1280, height: 720 };
 
     const duration = Number(form.get("duration") ?? 5);
     if (!TALK_DURATIONS.includes(duration) || !spec.durations.includes(duration)) {
@@ -116,7 +119,7 @@ export async function POST(request: Request) {
 
     const compiled = compilePrompt({
       model,
-      aspectRatio: aspectRatioInput,
+      aspectRatio,
       duration,
       userPrompt: script,
       scenes: [] as Scene[],
@@ -141,9 +144,9 @@ export async function POST(request: Request) {
       voiceoverLanguage: languageCodeFor(language),
       voiceoverVoiceId: audioMode === "tts" ? voiceKey : null,
       durationSeconds: duration,
-      aspectRatio: aspectRatioInput,
-      width: spec.aspectRatioSizes[aspectRatioInput].width,
-      height: spec.aspectRatioSizes[aspectRatioInput].height,
+      aspectRatio,
+      width: size.width,
+      height: size.height,
       withAudio: spec.supportsAudio,
       requestPayload: [{ clipIndex: 0, prompt: compiled.prompt, duration }],
     });
@@ -163,8 +166,8 @@ export async function POST(request: Request) {
         prompt: compiled.prompt,
         negativePrompt: compiled.negativePrompt,
         duration,
-        width: spec.aspectRatioSizes[aspectRatioInput].width,
-        height: spec.aspectRatioSizes[aspectRatioInput].height,
+        width: size.width,
+        height: size.height,
         withAudio: true,
         startFrame: audioMode === "native" ? { id: frameId, type: "UPLOADED" } : null,
         imageReference: audioMode === "tts" ? { id: frameId, type: "UPLOADED" } : null,

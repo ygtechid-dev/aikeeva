@@ -91,7 +91,7 @@ export default function Navbar({ user }: { user: NavUser }) {
                       onClick={() => setCreateOpen(false)}
                       className="block rounded-lg px-3 py-2.5 hover:bg-primary/10"
                     >
-                      <span className="block text-sm font-semibold">🎬 Video Iklan</span>
+                      <span className="block text-sm font-semibold">🎬 Video Generate</span>
                       <span className="block text-xs text-muted">
                         Skenario AI, voiceover, musik — video iklan lengkap
                       </span>

@@ -4,7 +4,8 @@ export type VideoModelId =
   | "hailuo-03"
   | "wan-2.6"
   | "kling-2.6"
-  | "bytedance/seedance-2.5";
+  | "bytedance/seedance-2.5"
+  | "google/gemini-omni-1.1-flash-preview";
 
 export type VideoModelSpec = {
   id: VideoModelId;
@@ -17,7 +18,8 @@ export type VideoModelSpec = {
   /** Durasi satu klip saat video panjang dipecah. */
   clipDuration: number;
   defaultDuration: number;
-  aspectRatioSizes: Record<AspectRatio, { width: number; height: number }>;
+  /** Resolusi yang diterima model per rasio. Sebagian model tidak mendukung semua rasio. */
+  aspectRatioSizes: Partial<Record<AspectRatio, { width: number; height: number }>>;
   supportsAudio: boolean;
   /** Model menerima parameter `motion_has_audio` (Wan 2.6 tidak). */
   supportsAudioParam: boolean;
@@ -115,9 +117,35 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     maxPromptLength: 9999,
     supportsNegativePrompt: false,
   },
+  "google/gemini-omni-1.1-flash-preview": {
+    id: "google/gemini-omni-1.1-flash-preview",
+    label: "Gemini Omni 1.1 Flash",
+    description: "Gemini Omni 1.1 Flash, cepat & hemat, audio native, durasi 3–10 detik.",
+    durations: [3, 4, 5, 6, 7, 8, 9, 10],
+    maxTotalDuration: 60,
+    clipDuration: 5,
+    defaultDuration: 5,
+    aspectRatioSizes: {
+      "16:9": { width: 1280, height: 720 },
+      "9:16": { width: 720, height: 1280 },
+    },
+    supportsAudio: true,
+    supportsAudioParam: true,
+    supportsStartFrame: true,
+    supportsEndFrame: true,
+    supportsAudioReference: false,
+    maxPromptLength: 2500,
+    supportsNegativePrompt: false,
+  },
 };
 
 export const DEFAULT_VIDEO_MODEL: VideoModelId = "hailuo-03";
+
+/** Kembalikan rasio yang didukung model; jika rasio diminta tidak didukung, fallback ke rasio pertama model. */
+export function resolveAspectRatio(spec: VideoModelSpec, requested: AspectRatio): AspectRatio {
+  if (spec.aspectRatioSizes[requested]) return requested;
+  return (Object.keys(spec.aspectRatioSizes) as AspectRatio[])[0] ?? "16:9";
+}
 
 export function isVideoModelId(value: unknown): value is VideoModelId {
   return typeof value === "string" && value in VIDEO_MODELS;
