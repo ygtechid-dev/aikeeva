@@ -80,12 +80,14 @@ export async function syncGeneration(record: GenerationRecord): Promise<Generati
 
   const urls = done.map((clip) => clip.videoUrl as string);
   let finalUrl = urls[0];
+  let durationSeconds: number | undefined;
 
   if (urls.length > 1) {
     try {
       const merged = await concatClips(urls, record.width, record.height);
-      await saveVideo(record.id, merged);
+      await saveVideo(record.id, merged.buffer);
       finalUrl = `/api/media/${record.id}.mp4`;
+      durationSeconds = merged.durationSeconds;
     } catch (error) {
       console.error(`concat failed for ${record.id}`, error);
       await updateGeneration(record.id, {
@@ -104,6 +106,7 @@ export async function syncGeneration(record: GenerationRecord): Promise<Generati
     videoUrl: finalUrl,
     thumbnailUrl: null,
     errorMessage: null,
+    ...(durationSeconds ? { durationSeconds } : {}),
     completedAt: "now",
   });
 

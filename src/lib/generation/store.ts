@@ -186,6 +186,7 @@ export async function updateGeneration(
     voiceoverGenerationId?: string | null;
     voiceoverLanguage?: string | null;
     voiceoverVoiceId?: string | null;
+    durationSeconds?: number;
     apiCreditCost?: number | null;
     errorMessage?: string | null;
     completedAt?: "now" | null;
@@ -208,6 +209,7 @@ export async function updateGeneration(
   if (patch.voiceoverGenerationId !== undefined) set("voiceover_generation_id", patch.voiceoverGenerationId);
   if (patch.voiceoverLanguage !== undefined) set("voiceover_language", patch.voiceoverLanguage);
   if (patch.voiceoverVoiceId !== undefined) set("voiceover_voice_id", patch.voiceoverVoiceId);
+  if (patch.durationSeconds !== undefined) set("duration_seconds", patch.durationSeconds);
   if (patch.apiCreditCost !== undefined) set("api_credit_cost", patch.apiCreditCost);
   if (patch.errorMessage !== undefined) set("error_message", patch.errorMessage);
 

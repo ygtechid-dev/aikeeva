@@ -100,8 +100,17 @@ export const REALISM_DIRECTIVE =
   "Realism: real footage look, natural skin texture with visible pores and blemishes, minimal makeup, " +
   "ordinary everyday people, believable Indonesian location, available light from a real source, " +
   "slight handheld camera sway, imperfect natural framing, true-to-life colors, subtle motion blur, " +
-  "natural film grain. Avoid any glossy, plastic, over-lit or AI-generated appearance. " +
+  "natural film grain, smooth continuous natural motion without stutter or frame jumps. " +
+  "Avoid any glossy, plastic, over-lit or AI-generated appearance. " +
   "No on-screen text, captions, logos or watermarks.";
+
+const CONTINUITY_DIRECTIVE =
+  "Continuity: keep the same subject, wardrobe, props, location and lighting as the previous part, " +
+  "with one continuous camera move, no cuts, no scene change and no jump in time.";
+
+const TALK_CONTINUITY_DIRECTIVE =
+  "Continuity: the same person with the same face, clothing, framing, background and lighting as the " +
+  "previous part, with natural continuous head and body movement and no cuts.";
 
 export const REALISM_NEGATIVE_PROMPT =
   "AI generated look, CGI, 3D render, plastic skin, airbrushed skin, beauty filter, " +
@@ -176,6 +185,11 @@ export function compilePrompt(input: CompileInput): CompiledPrompt {
     )
   );
   sections.push(REALISM_DIRECTIVE);
+
+  const isMultiClip = Boolean(input.clipCount && input.clipCount > 1);
+  if (isMultiClip) {
+    sections.push(isTalk ? TALK_CONTINUITY_DIRECTIVE : CONTINUITY_DIRECTIVE);
+  }
 
   if (isTalk) {
     const script = sanitize(options.talkScript ?? "");
