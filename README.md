@@ -1,6 +1,6 @@
 # Keeva AI
 
-AI video ad generator (Next.js 16 + MySQL + Leonardo.Ai).
+AI video ad generator (Next.js 16 + MySQL + Kenari via backend `aikenarivideo`).
 
 ## Setup
 
@@ -16,8 +16,10 @@ AI video ad generator (Next.js 16 + MySQL + Leonardo.Ai).
    | --- | --- |
    | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` | Koneksi MySQL |
    | `MYSQL_DATABASE` | Nama database (dibuat otomatis oleh migrate) |
-   | `LEONARDO_API_KEY` | Production API key dari <https://app.leonardo.ai/api-access> |
-   | `LEONARDO_VIDEO_MODEL` | Default model jika request tidak menyebut model (`hailuo-03` default, `wan-2.6`, `kling-2.6`, `bytedance/seedance-2.5`) |
+   | `KENARI_API_BASE_URL` | Base URL backend `aikenarivideo` (default `http://localhost:3000`) |
+   | `KENARI_VIDEO_MODEL` | Default model (`gemini-omni-flash`, `seedance-2.5`, `seedance-2.0`, `seedance-2.0-fast`) |
+   | `KENARI_RESOLUTION` | Resolusi output (`360p` / `720p` / `1080p`, default `720p`) |
+   | `FIRST_FRAME_MODEL` | Model image untuk first frame otomatis (default `gpt-image-1`) |
 
 3. Jalankan migrasi (membuat database + tabel `users`, `sessions`, `video_generations`):
 
@@ -25,10 +27,15 @@ AI video ad generator (Next.js 16 + MySQL + Leonardo.Ai).
    npm run db:migrate
    ```
 
-4. Jalankan dev server:
+4. Jalankan backend `aikenarivideo` di port `3000` (sesuai `KENARI_API_BASE_URL`),
+   lalu jalankan Next.js di port lain supaya tidak bentrok:
 
    ```bash
-   npm run dev
+   # terminal 1 — backend Kenari
+   cd ../../PROJECTBE/aikenarivideo && npm start
+
+   # terminal 2 — web
+   npm run dev -- -p 3001
    ```
 
 ## API
@@ -51,13 +58,14 @@ Semua endpoint generation butuh sesi login (cookie `keeva_session`, httpOnly).
 | Field | Wajib | Keterangan |
 | --- | --- | --- |
 | `prompt` | ya | Brief iklan, maks 5000 karakter |
-| `model` | tidak | `hailuo-03` (default), `wan-2.6`, `kling-2.6`, `bytedance/seedance-2.5` |
+| `model` | tidak | `gemini-omni-flash` (default), `seedance-2.5`, `seedance-2.0`, `seedance-2.0-fast` |
 | `duration` | tidak | Total video 5–60 detik, kelipatan panjang klip model |
 | `aspectRatio` | tidak | `16:9` (default), `9:16`, `1:1` |
-| `withAudio` | tidak | `true`/`false`, default `true` |
+| `withAudio` | tidak | Diabaikan; audio selalu native dari model Kenari |
 | `scenes` | tidak | JSON array `{ index, start, end, visual, narration }` |
 | `options` | tidak | JSON `{ style, bgm, voiceEnabled, voiceMode, voiceId, voiceSpeed, voiceLanguage, voiceFileName }` |
-| `startFrame` | tidak | File gambar (JPG/PNG/WEBP, maks 15MB) |
+| `modelImage` | tidak | Foto model/talent (JPG/PNG/WEBP, maks 12MB) |
+| `productImage` | tidak | Foto produk (JPG/PNG/WEBP, maks 12MB) |
 
 ### Durasi panjang (hingga 60 detik)
 
@@ -66,10 +74,15 @@ Video > satu klip dipecah otomatis:
 1. `planClips()` membagi total durasi menjadi klip sepanjang `clipDuration` model
    (semua model 5s). Scene yang lebih panjang dipotong, scene
    pendek digabung dalam satu klip.
-2. Tiap klip dikirim sebagai request terpisah ke Leonardo dan dicatat di tabel
-   `generation_clips`.
-3. Setelah semua klip selesai, `ffmpeg` menormalkan resolusi/fps/audio lalu
-   menggabungkannya (concat) menjadi satu MP4 di `/api/media/<id>.mp4`.
+2. First frame dibuat otomatis dari foto model + produk + scene (image model),
+   lalu klip pertama dikirim ke backend Kenari (`aikenarivideo`).
+3. Klip berikutnya baru dikirim setelah klip sebelumnya selesai, memakai frame
+   terakhir klip sebelumnya sebagai start frame (chaining) supaya nyambung.
+4. Setelah semua klip selesai, `ffmpeg` menormalkan resolusi/fps/audio lalu
+   menggabungkannya dengan crossfade (`xfade` + `acrossfade`, default 0.4s)
+   menjadi satu MP4 di `/api/media/<id>.mp4`. Fps mengikuti fps asli klip
+   supaya gerakan tidak judder; atur durasi crossfade lewat
+   `VIDEO_CROSSFADE_SECONDS` (0 = hard cut).
 
 Progress tersimpan di `video_generations.progress` (mis. `3/12 klip selesai`).
 
@@ -86,34 +99,32 @@ Supaya video tidak terlihat seperti render AI:
 3. `src/lib/generation/prompt.ts` — `REALISM_DIRECTIVE` disisipkan ke setiap prompt,
    `stripAiLookTerms()` membersihkan teks scene, dan gaya "UGC / Natural" /
    "Sinematik" memakai deskripsi kamera nyata.
-4. `REALISM_NEGATIVE_PROMPT` dikirim sebagai `negative_prompt` ke model yang
-   mendukungnya (Wan 2.6). Model lain mendapat instruksi anti-AI di prompt utama
-   dan fitur `negative_prompt` dicatat di `unsupported_features`.
-5. Batas prompt mengikuti API: Hailuo 7000, Kling 2500, Wan 1500, Seedance 9999.
+4. `REALISM_NEGATIVE_PROMPT` ditulis sebagai blok `Avoid:` di prompt utama;
+   Kenari tidak menerima `negative_prompt` terpisah.
+5. Prompt disusun mengikuti struktur AI UGC Studio v.3: spec, reference
+   declaration, context, global realism, lighting, breakdown per detik, camera,
+   audio, rules, dan avoid.
 
 ### Model
 
-| Model | ID | Durasi/klip | Audio |
-| --- | --- | --- | --- |
-| MiniMax Hailuo 03 (default) | `hailuo-03` | 5–15s | ya |
-| Wan 2.6 | `wan-2.6` | 5 / 10 / 15s | ya |
-| Kling 2.6 | `kling-2.6` | 5 / 10s | ya |
-| Seedance 2.5 | `bytedance/seedance-2.5` | 4–30s | ya |
+| Model | ID | Durasi/klip | Audio | Referensi |
+| --- | --- | --- | --- | --- |
+| Gemini Omni Flash (default) | `gemini-omni-flash` | 3–10s | native | ya |
+| Seedance 2.5 | `seedance-2.5` | 4–30s | native | maks 9 |
+| Seedance 2.0 | `seedance-2.0` | 4–15s | native | maks 9 |
+| Seedance 2.0 Fast | `seedance-2.0-fast` | 4–15s | native | maks 9 |
 
 ### Voiceover
 
-Voiceover AI dihasilkan **langsung oleh model video** (Kling 2.6 / Seedance 2.5),
-tidak ada TTS terpisah. Narasi tiap scene ditulis ke prompt sebagai `Spoken line: "..."`,
-plus instruksi bahasa dan tone suara, sehingga audio keluar bersama MP4.
-
-Konsekuensinya aksen mengikuti kemampuan model video — kalau butuh aksen Indonesia
-yang benar-benar native, perlu TTS terpisah lalu di-mux (belum aktif).
+Audio dihasilkan **langsung oleh model video Kenari (native)**. Tidak ada TTS
+terpisah dan fitur Talk/Motion Control sudah dihapus. Narasi tiap scene ditulis ke
+prompt sebagai dialogue, sehingga audio keluar bersama MP4.
 
 ### Fitur yang belum didukung model
 
-Leonardo hanya menerima satu prompt + parameter terbatas. Semua yang tidak bisa
-dipetakan ke parameter model (multi-scene storyboard, voiceover/TTS, file suara
-sendiri, BGM terpisah, gaya visual, end frame di Kling) **tetap disimpan**:
+Kenari hanya menerima satu prompt + parameter terbatas. Semua yang tidak bisa
+dipetakan ke parameter model (multi-scene storyboard, TTS, file suara sendiri,
+BGM terpisah, gaya visual) **tetap disimpan**:
 
 - `video_generations.unsupported_features` — JSON detail tiap fitur + payload aslinya.
 - `video_generations.compiled_prompt` — prompt final yang benar-benar dikirim ke model
@@ -172,12 +183,12 @@ vercel --prod
 | `MYSQL_USER` | `xxxxxxxx.root` |
 | `MYSQL_PASSWORD` | `********` |
 | `MYSQL_DATABASE` | `aikeeva` |
-| `LEONARDO_API_KEY` | `c1c2...` |
-| `LEONARDO_VIDEO_MODEL` | `hailuo-03` |
+| `KENARI_API_BASE_URL` | `https://api-aikenari.example.com` |
+| `KENARI_VIDEO_MODEL` | `gemini-omni-flash` |
 | `OPENAI_API_KEY` | `sk-proj-...` |
 | `OPENAI_MODEL` | `gpt-4.1-mini` |
 
-`LEONARDO_API_BASE_URL` dan `OPENAI_BASE_URL` opsional.
+`KENARI_API_BASE_URL` dan `OPENAI_BASE_URL` opsional (default: localhost:3000 dan api.openai.com).
 
 ### 5. Jalankan migrasi ke database produksi
 
@@ -194,10 +205,10 @@ MYSQL_HOST=... MYSQL_USER=... MYSQL_PASSWORD=... MYSQL_DATABASE=aikeeva \
    `.data/media` (lokal). Di Vercel file itu hilang setelah instance didaur
    ulang. Untuk produksi, ganti `src/lib/media/storage.ts` agar mengunggah ke
    object storage (Vercel Blob / S3 / R2), lalu simpan URL publiknya.
-2. **Durasi function.** Route `POST /api/generations` mengirim semua klip secara
-   berurutan. Untuk 60 detik (12 klip) ini bisa melewati batas waktu. Set
-   `maxDuration` di route (butuh plan Pro) atau ubah alur menjadi:
-   kirim 1 klip per request, lalu gabungkan saat polling.
+2. **Durasi function.** Route `POST /api/generations` sekarang membuat first frame
+   otomatis (bisa 30–60 detik) lalu hanya mengirim klip pertama. Klip berikutnya
+   dikirim saat polling (`GET /api/generations/[id]`). Set `maxDuration` di route
+   kalau memakai Vercel.
 3. **ffmpeg.** `ffmpeg-static` (~80MB) membuat bundle function besar. Kalau
    melewati limit, hapus dependency tersebut dan set `FFMPEG_PATH` ke binary
    yang tersedia, atau pindahkan concat ke worker terpisah.
@@ -284,8 +295,8 @@ MYSQL_PASSWORD=PASSWORD_KUAT
 MYSQL_DATABASE=aikeeva
 MYSQL_POOL_SIZE=10
 
-LEONARDO_API_KEY=xxxx
-LEONARDO_VIDEO_MODEL=hailuo-03
+KENARI_API_BASE_URL=http://localhost:3000
+KENARI_VIDEO_MODEL=gemini-omni-flash
 OPENAI_API_KEY=sk-proj-xxxx
 OPENAI_MODEL=gpt-4.1-mini
 

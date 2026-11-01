@@ -359,3 +359,99 @@ export async function concatClips(
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+/**
+ * Mengambil frame terakhir dari sebuah klip untuk dipakai sebagai start frame
+ * klip berikutnya (image-to-video chaining).
+ */
+export async function extractLastFrame(url: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "keeva-frame-"));
+
+  try {
+    const source = join(dir, "source.mp4");
+    const target = join(dir, "last.jpg");
+    await writeFile(source, await download(url));
+
+    try {
+      await runFfmpeg([
+        "-y",
+        "-loglevel",
+        "error",
+        "-sseof",
+        "-0.3",
+        "-i",
+        source,
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        target,
+      ]);
+    } catch {
+      await runFfmpeg([
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        source,
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        target,
+      ]);
+    }
+
+    return { buffer: await readFile(target), mimeType: "image/jpeg" };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Perkecil foto (model/produk/first frame) supaya aman dikirim ke backend Kenari
+ * sebagai data URL. Output selalu JPEG.
+ */
+export async function compressImage(input: {
+  buffer: Buffer;
+  mimeType: string;
+}): Promise<{ buffer: Buffer; mimeType: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "keeva-image-"));
+
+  try {
+    const extension =
+      input.mimeType === "image/png" ? "png" : input.mimeType === "image/webp" ? "webp" : "jpg";
+    const source = join(dir, `source.${extension}`);
+    const target = join(dir, "compressed.jpg");
+    await writeFile(source, input.buffer);
+
+    try {
+      await runFfmpeg([
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        source,
+        "-vf",
+        "scale=w=min(1280\\,iw):h=-2",
+        "-q:v",
+        "3",
+        "-pix_fmt",
+        "yuvj420p",
+        "-frames:v",
+        "1",
+        target,
+      ]);
+      const buffer = await readFile(target);
+      if (buffer.length > 0) {
+        return { buffer, mimeType: "image/jpeg" };
+      }
+    } catch (error) {
+      console.error("compressImage failed, using original", error);
+    }
+
+    return input;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}

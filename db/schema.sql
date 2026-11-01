@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS video_generations (
   id CHAR(36) NOT NULL,
   user_id BIGINT UNSIGNED NOT NULL,
-  provider VARCHAR(40) NOT NULL DEFAULT 'leonardo',
-  provider_generation_id CHAR(36) NULL,
+  provider VARCHAR(40) NOT NULL DEFAULT 'kenari',
+  provider_generation_id VARCHAR(120) NULL,
   model VARCHAR(80) NOT NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'queued',
   progress VARCHAR(40) NULL,
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS generation_clips (
   id CHAR(36) NOT NULL,
   generation_id CHAR(36) NOT NULL,
   clip_index INT NOT NULL,
-  provider_generation_id CHAR(36) NULL,
+  provider_generation_id VARCHAR(120) NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'queued',
   compiled_prompt TEXT NOT NULL,
   negative_prompt TEXT NULL,
@@ -87,3 +87,9 @@ CREATE TABLE IF NOT EXISTS generation_clips (
   CONSTRAINT generation_clips_generation_id_foreign
     FOREIGN KEY (generation_id) REFERENCES video_generations (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- Kenari job id bisa lebih panjang dari UUID Leonardo (CHAR(36)).
+-- ALTER idempotent supaya database lama ikut menyesuaikan.
+ALTER TABLE video_generations MODIFY provider_generation_id VARCHAR(120) NULL;
+ALTER TABLE generation_clips MODIFY provider_generation_id VARCHAR(120) NULL;

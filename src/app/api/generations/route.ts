@@ -1,26 +1,31 @@
 import { requireUser } from "@/lib/api/auth";
 import { ApiError, jsonError, jsonOk, toGenerationDto } from "@/lib/api/http";
-import { uploadImageFile } from "@/lib/api/uploads";
-import { createClips, listClips, updateClip } from "@/lib/generation/clips";
+import { createClips, listClips } from "@/lib/generation/clips";
 import { clipDuration, planClips } from "@/lib/generation/plan";
 import { languageCodeFor } from "@/lib/generation/language";
 import { compilePrompt, type GenerationOptions, type Scene } from "@/lib/generation/prompt";
 import { insertGeneration, listGenerationsForUser, updateGeneration } from "@/lib/generation/store";
 import { syncGeneration } from "@/lib/generation/sync";
-import { LeonardoError, createVideoGeneration } from "@/lib/leonardo/client";
+import { submitClip } from "@/lib/generation/submit";
+import { compressImage } from "@/lib/media/ffmpeg";
+import { generateFirstFrame } from "@/lib/media/firstframe";
+import { KenariError, type ImageAsset } from "@/lib/kenari/client";
 import {
   MAX_PROMPT_LENGTH,
   MAX_TOTAL_DURATION,
   VIDEO_MODELS,
+  canvasSize,
   isVideoModelId,
   resolveAspectRatio,
+  resolveResolution,
   resolveVideoModel,
   type AspectRatio,
   type VideoModelId,
-} from "@/lib/leonardo/models";
+} from "@/lib/kenari/models";
 
 const ASPECT_RATIOS: AspectRatio[] = ["16:9", "9:16", "1:1"];
 const MAX_SCENES = 20;
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
 function parseScenes(raw: string | null): Scene[] {
   if (!raw) return [];
@@ -68,6 +73,17 @@ function parseOptions(raw: string | null): GenerationOptions {
   }
 }
 
+async function readImage(value: FormDataEntryValue | null, field: string): Promise<ImageAsset | null> {
+  if (!(value instanceof File) || value.size === 0) return null;
+  if (value.size > MAX_IMAGE_BYTES) {
+    throw new ApiError(`Gambar ${field} lebih dari 12MB.`, 413);
+  }
+  if (!value.type.startsWith("image/")) {
+    throw new ApiError(`Format ${field} harus JPG, PNG, atau WEBP.`, 415);
+  }
+  return compressImage({ buffer: Buffer.from(await value.arrayBuffer()), mimeType: value.type });
+}
+
 export async function POST(request: Request) {
   try {
     const user = await requireUser();
@@ -95,7 +111,7 @@ export async function POST(request: Request) {
     }
     const aspectRatio = resolveAspectRatio(spec, aspectRatioInput);
 
-    const requestedDuration = Number(form.get("duration") ?? spec.clipDuration);
+    const requestedDuration = Number(form.get("duration") ?? spec.defaultDuration);
     if (!Number.isFinite(requestedDuration) || requestedDuration < spec.clipDuration) {
       throw new ApiError(`Durasi minimal ${spec.clipDuration} detik.`, 400);
     }
@@ -103,25 +119,33 @@ export async function POST(request: Request) {
       throw new ApiError(`Durasi maksimal ${MAX_TOTAL_DURATION} detik.`, 400);
     }
 
-    const withAudio =
-      spec.supportsAudio && spec.supportsAudioParam && String(form.get("withAudio") ?? "true") !== "false";
     const scenes = parseScenes(form.get("scenes") as string | null);
     const options = parseOptions(form.get("options") as string | null);
 
-    const startFrameFile = form.get("startFrame");
-    const endFrameFile = form.get("endFrame");
+    const modelImage = await readImage(form.get("modelImage") ?? form.get("startFrame"), "foto model");
+    const productImage = await readImage(form.get("productImage"), "foto produk");
 
-    const startFrameId =
-      startFrameFile instanceof File && startFrameFile.size > 0
-        ? await uploadImageFile(startFrameFile, "start frame")
-        : null;
-    const endFrameId =
-      spec.supportsEndFrame && endFrameFile instanceof File && endFrameFile.size > 0
-        ? await uploadImageFile(endFrameFile, "end frame")
-        : null;
-
-    const { width, height } = spec.aspectRatioSizes[aspectRatio] ?? { width: 1280, height: 720 };
+    const resolution = resolveResolution(spec);
+    const { width, height } = canvasSize(aspectRatio, resolution);
     const plans = planClips(scenes, requestedDuration, spec.clipDuration);
+
+    // First frame otomatis: gabungkan foto model + produk + scene jadi satu
+    // gambar pembuka. Kalau image model tidak tersedia, pakai foto model.
+    let firstFrame: ImageAsset | null = null;
+    if (process.env.FIRST_FRAME_ENABLED !== "false" && (modelImage || productImage)) {
+      firstFrame = await generateFirstFrame({
+        prompt: scenes[0]?.visual ?? prompt,
+        aspectRatio,
+        modelImage,
+        productImage,
+      });
+    }
+    if (!firstFrame && modelImage) {
+      firstFrame = modelImage;
+    }
+    if (firstFrame) {
+      firstFrame = await compressImage(firstFrame);
+    }
 
     const compiledClips = plans.map((plan) => {
       const compiled = compilePrompt({
@@ -131,7 +155,9 @@ export async function POST(request: Request) {
         userPrompt: prompt,
         scenes: plan.scenes,
         options,
-        hasEndFrame: Boolean(endFrameId),
+        hasFirstFrame: Boolean(firstFrame),
+        hasModelRef: Boolean(modelImage) && plan.clipIndex === 0,
+        hasProductRef: Boolean(productImage) && plan.clipIndex === 0,
         clipIndex: plan.clipIndex,
         clipCount: plans.length,
       });
@@ -153,8 +179,8 @@ export async function POST(request: Request) {
         )
         .join("\n\n---\n\n"),
       unsupportedFeatures: mergedFeatures,
-      startFrameLeonardoId: startFrameId,
-      endFrameLeonardoId: endFrameId,
+      startFrameLeonardoId: null,
+      endFrameLeonardoId: null,
       audioReferenceLeonardoId: null,
       voiceoverUrl: null,
       voiceoverGenerationId: null,
@@ -164,13 +190,18 @@ export async function POST(request: Request) {
       aspectRatio,
       width,
       height,
-      withAudio,
-      requestPayload: compiledClips.map((item) => ({
-        clipIndex: item.plan.clipIndex,
-        prompt: item.compiled.prompt,
-        negativePrompt: item.compiled.negativePrompt,
-        duration: clipDuration(item.plan),
-      })),
+      withAudio: spec.supportsAudio,
+      requestPayload: {
+        resolution,
+        firstFrameGenerated: Boolean(firstFrame),
+        modelImage: Boolean(modelImage),
+        productImage: Boolean(productImage),
+        clips: compiledClips.map((item) => ({
+          clipIndex: item.plan.clipIndex,
+          prompt: item.compiled.prompt,
+          duration: clipDuration(item.plan),
+        })),
+      },
     });
 
     await createClips(
@@ -184,60 +215,53 @@ export async function POST(request: Request) {
     );
 
     const clips = await listClips(record.id);
-    let totalCost = 0;
-    let submitted = 0;
+    const firstClip = clips[0];
 
-    for (const clip of clips) {
+    if (firstClip) {
       try {
-        const result = await createVideoGeneration({
-          model,
-          prompt: clip.compiledPrompt,
-          negativePrompt: clip.negativePrompt,
-          duration: spec.clipDuration,
-          width,
-          height,
-          withAudio,
-          startFrame: clip.clipIndex === 0 && startFrameId ? { id: startFrameId, type: "UPLOADED" } : null,
-          endFrame:
-            clip.clipIndex === clips.length - 1 && endFrameId
-              ? { id: endFrameId, type: "UPLOADED" }
-              : null,
-        });
-
-        await updateClip(clip.id, {
-          providerGenerationId: result.generationId,
-          status: "pending",
-        });
-
-        if (result.cost) totalCost += Number(result.cost.amount);
-        submitted += 1;
+        const referenceImages = [modelImage, productImage].filter(Boolean) as ImageAsset[];
+        try {
+          await submitClip({
+            clip: firstClip,
+            model,
+            prompt: firstClip.compiledPrompt,
+            duration: spec.clipDuration,
+            resolution,
+            aspectRatio,
+            firstFrame,
+            referenceImages,
+          });
+        } catch (error) {
+          if (!firstFrame) throw error;
+          console.warn("submit with first frame failed, retrying without it", error);
+          await submitClip({
+            clip: firstClip,
+            model,
+            prompt: firstClip.compiledPrompt,
+            duration: spec.clipDuration,
+            resolution,
+            aspectRatio,
+            firstFrame: null,
+            referenceImages,
+          });
+        }
       } catch (error) {
         const message =
-          error instanceof LeonardoError
-            ? `Leonardo menolak klip ${clip.clipIndex + 1}: ${error.message}`
-            : `Gagal mengirim klip ${clip.clipIndex + 1}.`;
-
-        await updateClip(clip.id, { status: "failed", errorMessage: message, completedAt: "now" });
+          error instanceof KenariError
+            ? `Kenari menolak klip 1: ${error.message}`
+            : "Gagal mengirim klip pertama ke Kenari.";
+        await updateGeneration(record.id, {
+          status: "failed",
+          errorMessage: message,
+          completedAt: "now",
+        });
+        return jsonError(message, 502, { generationId: record.id });
       }
-    }
-
-    if (submitted === 0) {
-      const clipErrors = clips
-        .filter((clip) => clip.status === "failed" && clip.errorMessage)
-        .map((clip) => clip.errorMessage as string);
-      const firstError = clipErrors[0] ?? "Semua klip gagal dikirim ke Leonardo.";
-      await updateGeneration(record.id, {
-        status: "failed",
-        errorMessage: firstError,
-        completedAt: "now",
-      });
-      return jsonError(firstError, 502, { generationId: record.id });
     }
 
     const updated = await updateGeneration(record.id, {
       status: "pending",
-      progress: `${submitted}/${clips.length} klip dikirim`,
-      apiCreditCost: totalCost || null,
+      progress: `1/${clips.length} klip dikirim`,
     });
 
     return jsonOk({ generation: toGenerationDto(updated) }, 202);

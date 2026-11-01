@@ -1,5 +1,5 @@
-import type { AspectRatio, VideoModelId } from "@/lib/leonardo/models";
-import { MAX_PROMPT_LENGTH, VIDEO_MODELS } from "@/lib/leonardo/models";
+import type { AspectRatio, VideoModelId } from "@/lib/kenari/models";
+import { MAX_PROMPT_LENGTH, VIDEO_MODELS } from "@/lib/kenari/models";
 import { VOICES } from "@/lib/templates";
 
 export type Scene = {
@@ -19,11 +19,9 @@ export type GenerationOptions = {
   voiceSpeed?: number;
   voiceLanguage?: string;
   voiceFileName?: string;
-  /** "talk" = motion control (lip-sync), "standard" = iklan biasa. */
+  /** Dipertahankan untuk kompatibilitas data lama; Talk/TTS tidak dipakai lagi. */
   motionMode?: "talk" | "standard";
-  /** Teks yang diucapkan saat motionMode = talk (akan dibuat TTS untuk lip-sync). */
   talkScript?: string;
-  /** "native" = suara dari model video (hemat), "tts" = suara AI presisi via audio_reference. */
   audioMode?: "native" | "tts";
 };
 
@@ -40,7 +38,9 @@ export type CompileInput = {
   userPrompt: string;
   scenes: Scene[];
   options: GenerationOptions;
-  hasEndFrame: boolean;
+  hasFirstFrame: boolean;
+  hasModelRef: boolean;
+  hasProductRef: boolean;
   clipIndex?: number;
   clipCount?: number;
 };
@@ -53,18 +53,19 @@ export type CompiledPrompt = {
 
 const STYLE_DIRECTIVES: Record<string, string> = {
   Sinematik:
-    "shot on a Sony FX3 with a 35mm lens, shallow depth of field, natural film grain, practical location lighting, subtle handheld movement",
+    "smooth cinematic camera, 35mm lens, shallow depth of field, practical location lighting, natural film grain",
   "UGC / Natural":
-    "shot on an iPhone 15 Pro handheld in vertical, available daylight, slightly imperfect framing, casual authentic delivery",
+    "raw iPhone 15 Pro handheld footage, available daylight, slightly imperfect framing, casual authentic delivery",
   "Animasi 3D":
     "stylized 3D animation, soft global illumination, expressive motion, consistent character design",
   Minimalis:
-    "minimalist composition, clean negative space, calm restrained colors, soft window light, static camera",
+    "static camera, minimalist composition, clean negative space, calm restrained colors, soft window light",
   "Enerjik / Trendy":
     "handheld camera with quick natural movement, available light, vivid but true-to-life colors, real street locations",
 };
 
-/** Bahasa Inggris yang membuat hasil terlihat seperti render AI, bukan rekaman nyata. */
+const HANDHELD_STYLES = new Set(["UGC / Natural", "Enerjik / Trendy", "Sinematik"]);
+
 const AI_LOOK_TERMS = [
   "cinematic",
   "hyper-realistic",
@@ -97,26 +98,22 @@ const AI_LOOK_TERMS = [
 ];
 
 export const REALISM_DIRECTIVE =
-  "Realism: real footage look, natural skin texture with visible pores and blemishes, minimal makeup, " +
-  "ordinary everyday people, believable Indonesian location, available light from a real source, " +
-  "slight handheld camera sway, imperfect natural framing, true-to-life colors, subtle motion blur, " +
-  "natural film grain, smooth continuous natural motion without stutter or frame jumps. " +
-  "Avoid any glossy, plastic, over-lit or AI-generated appearance. " +
-  "No on-screen text, captions, logos or watermarks.";
-
-const CONTINUITY_DIRECTIVE =
-  "Continuity: keep the same subject, wardrobe, props, location and lighting as the previous part, " +
-  "with one continuous camera move, no cuts, no scene change and no jump in time.";
-
-const TALK_CONTINUITY_DIRECTIVE =
-  "Continuity: the same person with the same face, clothing, framing, background and lighting as the " +
-  "previous part, with natural continuous head and body movement and no cuts.";
+  "Realism: raw phone-camera footage, natural skin texture with visible pores and micro-texture, " +
+  "subtle under-eye texture, flyaway hair, small clothing wrinkles, realistic hand anatomy, " +
+  "natural blinking and breathing, subtle autofocus and exposure breathing, mild sensor noise, " +
+  "realistic motion blur, imperfect natural framing. " +
+  "Avoid any glossy, plastic, over-lit, render or AI-generated appearance.";
 
 export const REALISM_NEGATIVE_PROMPT =
-  "AI generated look, CGI, 3D render, plastic skin, airbrushed skin, beauty filter, " +
-  "over-smooth faces, waxy skin, over-saturated colors, HDR glow, unnatural lighting, " +
-  "deformed hands, extra fingers, distorted face, warped text, subtitles, watermark, logo, " +
-  "cartoon, anime, illustration, low quality, blurry, flickering, jittery morphing";
+  "identity drift, face distortion, plastic skin, airbrushed skin, beauty filter, waxy skin, " +
+  "over-saturated colors, HDR glow, unnatural lighting, deformed hands, extra fingers, " +
+  "warped product label, floating product, product morphing, background jump, over-polished ad look, " +
+  "subtitles, captions, watermark, logo overlay, dead air, low quality, blurry, flickering";
+
+
+function sanitize(text: string) {
+  return text.replace(/\s+/g, " ").trim();
+}
 
 function stripAiLookTerms(text: string) {
   let result = text;
@@ -124,34 +121,7 @@ function stripAiLookTerms(text: string) {
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     result = result.replace(new RegExp(`\\b${escaped}\\b`, "gi"), "");
   }
-
-  return result
-    .replace(/\s{2,}/g, " ")
-    .replace(/\s+([,.;:])/g, "$1")
-    .replace(/,\s*of\s+/gi, " of ")
-    .replace(/\b(with|and|of|in|on|at|for)\s+(?=[,.;])/gi, "")
-    .replace(/,\s*(with|and|of|in|on|at|for)\b/gi, ",")
-    .replace(/\b(with|and|of)\s+(?=[a-z]+ing\b)/gi, "")
-    .replace(/,\s*(?=[a-z])/g, (match, offset, full) => {
-      const before = String(full).slice(0, offset);
-      return /\b(shot|view|angle|close-up|frame)$/i.test(before.trim()) ? " of " : match;
-    })
-    .replace(/(,\s*){2,}/g, ", ")
-    .replace(/,\s*([.;:])/g, "$1")
-    .replace(/^[\s,;]+|[\s,;]+$/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-const BGM_MOODS: Record<string, string> = {
-  upbeat: "upbeat energetic music",
-  calm: "calm ambient music",
-  corporate: "clean corporate background music",
-  dramatic: "dramatic cinematic score",
-};
-
-function sanitize(text: string) {
-  return text.replace(/\s+/g, " ").trim();
+  return result.replace(/\s{2,}/g, " ").replace(/\s+([,.;:])/g, "$1").trim();
 }
 
 function sanitizeVisual(text: string) {
@@ -164,107 +134,189 @@ function voiceTone(voiceId: string | undefined) {
   return `${voice.gender === "Pria" ? "male" : "female"} voice, ${voice.tone.toLowerCase()}`;
 }
 
+function orientation(aspectRatio: AspectRatio) {
+  if (aspectRatio === "9:16") return "vertical";
+  if (aspectRatio === "16:9") return "horizontal";
+  return "square";
+}
+
+function seconds(value: number) {
+  return `${Number(value.toFixed(1))}s`;
+}
+
 export function compilePrompt(input: CompileInput): CompiledPrompt {
   const spec = VIDEO_MODELS[input.model];
   const unsupported: UnsupportedFeature[] = [];
   const sections: string[] = [];
   const options = input.options;
-  const isTalk = options.motionMode === "talk";
+  const isMultiClip = Boolean(input.clipCount && input.clipCount > 1);
 
   const style = options.style ? STYLE_DIRECTIVES[options.style] ?? options.style : "";
-  const part =
-    input.clipCount && input.clipCount > 1
-      ? ` This is part ${(input.clipIndex ?? 0) + 1} of ${input.clipCount}, continuing the same commercial.`
-      : "";
+  const handheld = options.style ? HANDHELD_STYLES.has(options.style) : true;
+  const isAnimation = options.style === "Animasi 3D";
+  const baseLook = isAnimation
+    ? "stylized 3D animation"
+    : options.style === "Sinematik"
+      ? "cinematic real-footage style"
+      : "raw phone-shot UGC style";
+  const realism = isAnimation
+    ? "Animation realism: consistent character design, soft global illumination, expressive motion, believable physics, no flicker or morphing."
+    : REALISM_DIRECTIVE;
+  const scenes = input.scenes.filter((scene) => sanitize(scene.visual).length > 0);
+  const narrationLines = scenes.map((scene) => sanitize(scene.narration ?? "")).filter(Boolean);
+  const hasDialogue = Boolean(options.voiceEnabled) && narrationLines.length > 0;
 
+  // 1. Spec
   sections.push(
     sanitize(
-      `A ${input.duration} second ${isTalk ? "talking portrait" : "commercial"} shot in ${input.aspectRatio} framing.` +
-        (style ? ` Camera and look: ${style}.` : "") +
-        part
+      `Create a ${input.duration}-second ${orientation(input.aspectRatio)} ${input.aspectRatio} video in ${baseLook}.` +
+        (hasDialogue
+          ? " The subject speaks directly to camera with lip-synced dialogue in Bahasa Indonesia."
+          : " No dialogue and no voice-over.") +
+        (isMultiClip
+          ? ` This is shot ${(input.clipIndex ?? 0) + 1} of ${input.clipCount}, continuing the same video.`
+          : "")
     )
   );
-  sections.push(REALISM_DIRECTIVE);
 
-  const isMultiClip = Boolean(input.clipCount && input.clipCount > 1);
-  if (isMultiClip) {
-    sections.push(isTalk ? TALK_CONTINUITY_DIRECTIVE : CONTINUITY_DIRECTIVE);
-  }
-
-  if (isTalk) {
-    const script = sanitize(options.talkScript ?? "");
-    const tts = options.audioMode === "tts";
-    const scene = sanitizeVisual(input.userPrompt);
-    if (scene) {
-      sections.push(`Scene: ${scene}`);
-    }
-    sections.push(
-      script
-        ? "Motion: the subject performs the scene above with natural body movement and facial expressions, and speaks with realistic lip movement synced to the spoken audio. Subtle head motion and natural blinks."
-        : "Motion: the subject performs the scene above with natural body movement, subtle head motion, and natural blinks. The subject does not speak."
+  // 2. Reference declaration
+  const refs: string[] = [];
+  if (input.hasFirstFrame) {
+    refs.push(
+      "The provided start frame is the exact frame 0 of this shot. Preserve the character's face, skin tone, hair, body proportions, outfit, product, location, framing and lighting exactly. Do not reframe, re-light or change identity."
     );
-    if (script) {
-      sections.push(`Spoken line: "${script}"`);
-      if (!tts) {
-        const language = options.voiceLanguage ?? "Bahasa Indonesia";
-        sections.push(
-          `Audio: the subject speaks the spoken line above out loud in ${language} with their own voice, clear audible dialogue and natural lip sync. No background music.`
-        );
-      }
-    } else if (!tts) {
-      sections.push(
-        "Audio: ambient sound only matching the scene. No dialogue, no voice-over, the subject keeps their mouth closed."
-      );
-    }
-    if (tts && !spec.supportsAudioReference) {
-      unsupported.push({
-        feature: "motion_mode_talk",
-        reason: `${spec.label} tidak mendukung audio_reference untuk suara TTS; teks ucapan ditulis ke prompt dan model men-generate audio sendiri.`,
-        payload: { motionMode: "talk", talkScript: script || null },
-      });
-    }
-    if (input.clipCount && input.clipCount > 1) {
-      unsupported.push({
-        feature: "motion_mode_talk_multi_clip",
-        reason: "Mode Motion Control ideal untuk satu klip; klip lanjutan akan tetap menggunakan start frame wajah.",
-        payload: { clipCount: input.clipCount },
-      });
-    }
-    const limit = Math.min(spec.maxPromptLength, MAX_PROMPT_LENGTH);
-    const prompt = sections.join("\n").slice(0, limit);
-    return { prompt, negativePrompt: null, unsupportedFeatures: unsupported };
+  }
+  if (input.hasModelRef) {
+    refs.push(
+      "The identity reference image defines the exact person: preserve face, facial proportions, skin tone, apparent age, hair and body proportions. Never blend, beautify, slim or replace this person."
+    );
+  }
+  if (input.hasProductRef) {
+    refs.push(
+      "The product reference image defines the exact product: preserve shape, color, label text, packaging, proportions and visible details. Never warp, redesign or make the label illegible. The product's own label and logo are part of the product and must stay accurate; do not add any other text, captions, watermarks or graphic overlays."
+    );
+  }
+  if (refs.length > 0) {
+    sections.push(`Reference declaration:\n${refs.map((line) => `- ${line}`).join("\n")}`);
+    sections.push(
+      "Priority: identity and product references are authoritative. Never merge their roles or invent details that are not visible in them." +
+        (input.hasModelRef && input.hasProductRef
+          ? " Reference order: the identity reference is the first reference image; the product reference is the second reference image."
+          : "")
+    );
   }
 
-  const scenes = input.scenes.filter((scene) => sanitize(scene.visual).length > 0);
-  const narrationLines = scenes
-    .map((scene) => sanitize(scene.narration ?? ""))
-    .filter(Boolean);
+  // 3. Context
+  const context = [`Brief: ${sanitizeVisual(input.userPrompt)}`];
+  if (isMultiClip) {
+    context.push(
+      "This shot is part of one continuous video: keep the same subject, wardrobe, product, location and lighting as the previous shot."
+    );
+  }
+  context.push(
+    "Must NOT show: software UI, laptops, screens, floating interfaces, added on-screen text, captions, subtitles, watermarks, borders or collage. The product's own label is allowed and must stay accurate."
+  );
+  sections.push(`Context:\n${context.map((line) => `- ${line}`).join("\n")}`);
 
+  // 4. Global realism
+  sections.push(`Global realism:\n- ${realism}`);
+
+  // 5. Lighting
+  sections.push(
+    "Lighting: every light must have a clear real-world source, direction, falloff and matching shadows. " +
+      "Use available daylight or practical room light; never studio beauty lighting or shadowless faces."
+  );
+
+  // 6. Beat breakdown
+  const beats: string[] = [];
   if (scenes.length === 0) {
-    sections.push(`Scene: ${sanitizeVisual(input.userPrompt)}`);
-  } else if (scenes.length === 1) {
-    sections.push(`Scene: ${sanitizeVisual(scenes[0].visual)}`);
-    if (narrationLines[0]) {
-      sections.push(`Spoken line: "${narrationLines[0]}"`);
-    }
+    beats.push(
+      `- 0.0–${seconds(input.duration)} — ${sanitizeVisual(input.userPrompt)}. Natural micro-movements, realistic hand interaction, continuous subtle motion.`
+    );
   } else {
-    sections.push(`One continuous clip built from ${scenes.length} connected beats, in order:`);
     for (const scene of scenes) {
-      const narration = sanitize(scene.narration ?? "");
-      sections.push(
-        `- Beat ${scene.index + 1} (${scene.start}s-${scene.end}s): ${sanitizeVisual(scene.visual)}${
-          narration ? ` Spoken line: "${narration}"` : ""
-        }`
+      const start = Math.max(0, Math.min(input.duration, scene.start));
+      const end = Math.max(start + 0.5, Math.min(input.duration, scene.end));
+      const narration = hasDialogue ? sanitize(scene.narration ?? "") : "";
+      beats.push(
+        `- ${seconds(start)}–${seconds(end)} — ${sanitizeVisual(scene.visual)}. ` +
+          "Natural facial micro-expressions, believable hand movement and small body shifts." +
+          (narration ? ` Dialogue: "${narration}".` : "")
       );
     }
+    if (scenes.length > 1) {
+      unsupported.push({
+        feature: "multi_scene_storyboard",
+        reason: `${spec.label} membuat satu klip per request, jadi ${scenes.length} beat digabung menjadi satu prompt berurutan.`,
+        payload: scenes,
+      });
+    }
+  }
+  sections.push(`Breakdown:\n${beats.join("\n")}`);
+
+  // 7. Camera + pacing
+  sections.push(
+    isAnimation
+      ? "Camera: stylized animated camera with expressive, physically believable motion. No cuts mid-shot."
+      : `Camera: ${
+          handheld
+            ? "handheld phone camera with natural micro-shake and imperfect framing"
+            : "static phone camera with slight natural drift"
+        }` +
+          (style ? `, ${style}` : "") +
+          ". Movement must be physically plausible from the start frame. Hard cuts only between beats; no dead air, no cinematic dolly, orbit, gimbal or dramatic zoom."
+  );
+
+  // 8. Audio
+  if (hasDialogue) {
+    const language = options.voiceLanguage ?? "Bahasa Indonesia";
+    const pace =
+      options.voiceSpeed === undefined
+        ? "at a natural pace"
+        : options.voiceSpeed < 90
+          ? "slowly and calmly"
+          : options.voiceSpeed > 110
+            ? "with energetic fast pacing"
+            : "at a natural pace";
+    sections.push(
+      `Audio: the subject speaks the dialogue above in ${language} (${voiceTone(options.voiceId)}) ${pace}, ` +
+        "with native lip-sync and clear but not studio-clean phone audio. Ambient room sound only; no music, no voice-over, no subtitles."
+    );
     unsupported.push({
-      feature: "multi_scene_storyboard",
-      reason: `${spec.label} membuat satu klip per request, jadi ${scenes.length} scene digabung menjadi satu prompt berurutan.`,
-      payload: scenes,
+      feature: "voiceover_tts",
+      reason: "Kenari memakai audio native model; tidak ada TTS terpisah.",
+      payload: { voiceId: options.voiceId ?? null, language, speed: options.voiceSpeed ?? 100 },
+    });
+  } else {
+    sections.push(
+      "Audio: ambient room sound only, with natural product handling sounds when relevant. No dialogue, no voice-over, no music."
+    );
+  }
+
+  if (options.voiceEnabled && options.voiceMode === "own") {
+    unsupported.push({
+      feature: "voiceover_custom_audio",
+      reason: "Backend Kenari tidak menerima file voiceover; suara dihasilkan model video (native).",
+      payload: { fileName: options.voiceFileName ?? null },
     });
   }
 
-  sections.push(`Brief: ${sanitizeVisual(input.userPrompt)}`);
+  if (options.voiceEnabled && options.bgm && options.bgm !== "none") {
+    unsupported.push({
+      feature: "background_music",
+      reason: "BGM tidak bisa dipilih sebagai track terpisah; musik ditambahkan saat post-production.",
+      payload: { bgm: options.bgm },
+    });
+  }
+
+  // 9. Rules + avoid
+  sections.push(
+    "Rules:\n" +
+      "- Use the start frame as the exact starting point. Every movement must be plausible from that frame.\n" +
+      "- Keep the same subject, outfit, product and location throughout this shot. Do not change scene, angle or framing mid-shot.\n" +
+      "- The result must look like real footage recorded on a phone, not a polished cinematic ad."
+  );
+  sections.push(`Avoid: ${REALISM_NEGATIVE_PROMPT}.`);
 
   if (options.style) {
     unsupported.push({
@@ -274,81 +326,16 @@ export function compilePrompt(input: CompileInput): CompiledPrompt {
     });
   }
 
-  if (options.voiceEnabled) {
-    if (options.voiceMode === "own") {
-      unsupported.push({
-        feature: "voiceover_custom_audio",
-        reason: "Model video tidak menerima file audio voiceover; deskripsi suara ditulis ke prompt.",
-        payload: { fileName: options.voiceFileName ?? null },
-      });
-      sections.push(
-        "Audio: an authentic human voice-over in Bahasa Indonesia speaks the spoken lines above."
-      );
-    } else {
-      const language = options.voiceLanguage ?? "Bahasa Indonesia";
-      const pace =
-        options.voiceSpeed === undefined
-          ? "at a natural pace"
-          : options.voiceSpeed < 90
-            ? "slowly and calmly"
-            : options.voiceSpeed > 110
-              ? "with energetic fast pacing"
-              : "at a natural pace";
-
-      unsupported.push({
-        feature: "voiceover_tts",
-        reason:
-          "Voiceover dihasilkan langsung oleh model video dari prompt (tanpa TTS terpisah), jadi aksen mengikuti kemampuan model.",
-        payload: {
-          voiceId: options.voiceId ?? null,
-          language,
-          speed: options.voiceSpeed ?? 100,
-        },
-      });
-
-      sections.push(
-        `Audio: a native ${language} speaker (${voiceTone(options.voiceId)}) says the spoken lines above ${pace}, with clear Indonesian pronunciation and natural lip sync.`
-      );
-    }
-
-    if (options.bgm && options.bgm !== "none") {
-      unsupported.push({
-        feature: "background_music",
-        reason: "BGM tidak bisa dipilih sebagai track terpisah; mood musik ditulis ke prompt.",
-        payload: { bgm: options.bgm },
-      });
-      sections.push(`Background music: ${BGM_MOODS[options.bgm] ?? options.bgm}.`);
-    }
-  } else {
-    sections.push("No speech, no voice-over.");
-  }
-
-  if (!spec.supportsAudio) {
-    sections.push("No audio track.");
-  }
-
-  if (input.hasEndFrame && !spec.supportsEndFrame) {
-    unsupported.push({
-      feature: "end_frame",
-      reason: `${spec.label} tidak mendukung end frame; hanya start frame yang dipakai.`,
-      payload: null,
-    });
-  }
-
-  const limit = Math.min(spec.maxPromptLength, MAX_PROMPT_LENGTH);
-  const prompt = sections.join("\n").slice(0, limit);
-
-  const negativePrompt = spec.supportsNegativePrompt
-    ? REALISM_NEGATIVE_PROMPT.slice(0, 500)
-    : null;
-
-  if (!spec.supportsNegativePrompt && options.style) {
+  if (!spec.supportsNegativePrompt) {
     unsupported.push({
       feature: "negative_prompt",
-      reason: `${spec.label} tidak menerima negative prompt terpisah; instruksi anti-AI ditulis di prompt utama.`,
+      reason: `${spec.label} tidak menerima negative prompt terpisah; guardrail ditulis di prompt utama.`,
       payload: { negativePrompt: REALISM_NEGATIVE_PROMPT },
     });
   }
 
-  return { prompt, negativePrompt, unsupportedFeatures: unsupported };
+  const limit = Math.min(spec.maxPromptLength, MAX_PROMPT_LENGTH);
+  const prompt = sections.join("\n\n").slice(0, limit);
+
+  return { prompt, negativePrompt: null, unsupportedFeatures: unsupported };
 }

@@ -113,12 +113,12 @@ export async function insertGeneration(input: NewGeneration): Promise<Generation
   const id = randomUUID();
   await execute(
     `INSERT INTO video_generations (
-        id, user_id, provider_generation_id, model, status, user_prompt, compiled_prompt,
+        id, user_id, provider, provider_generation_id, model, status, user_prompt, compiled_prompt,
         unsupported_features, start_frame_leonardo_id, end_frame_leonardo_id,
         audio_reference_leonardo_id, voiceover_url, voiceover_generation_id, voiceover_language,
         voiceover_voice_id, duration_seconds, aspect_ratio, width, height, with_audio,
         request_payload
-      ) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, 'kenari', ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.userId,

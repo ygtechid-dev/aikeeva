@@ -1,7 +1,7 @@
 import type { SessionUser } from "@/lib/auth/session";
 import type { GenerationRecord } from "@/lib/generation/store";
-import type { VideoModelId } from "@/lib/leonardo/models";
-import { VIDEO_MODELS } from "@/lib/leonardo/models";
+import type { VideoModelId } from "@/lib/kenari/models";
+import { VIDEO_MODELS } from "@/lib/kenari/models";
 
 export function jsonOk(data: unknown, status = 200, headers?: HeadersInit) {
   return Response.json(data, { status, headers });
@@ -97,10 +97,12 @@ export function modelsCatalog() {
     clipDuration: model.clipDuration,
     maxTotalDuration: model.maxTotalDuration,
     defaultDuration: model.defaultDuration,
-    aspectRatios: Object.keys(model.aspectRatioSizes),
+    aspectRatios: model.aspectRatios,
     supportsAudio: model.supportsAudio,
     supportsStartFrame: model.supportsStartFrame,
     supportsEndFrame: model.supportsEndFrame,
-    supportsAudioReference: model.supportsAudioReference,
+    supportsAudioReference: false,
+    resolutions: model.resolutions,
+    defaultResolution: model.defaultResolution,
   }));
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { TEMPLATES, VOICES, VOICE_LANGUAGES, BGM_OPTIONS } from "@/lib/templates";
 import ImageUpload, { type RefImage } from "@/components/ImageUpload";
@@ -62,46 +62,46 @@ function durationsFor(clipSeconds: number) {
 
 const FALLBACK_MODELS: ModelOption[] = [
   {
-    id: "hailuo-03",
-    label: "MiniMax Hailuo 03",
-    description: "MiniMax Hailuo 03, gerakan natural dengan audio native, 5–15 detik per klip.",
+    id: "gemini-omni-flash",
+    label: "Gemini Omni Flash",
+    description: "Google Gemini Omni Flash, audio native, 3–10 detik per klip, paling hemat untuk UGC.",
     durations: durationsFor(5),
     clipDuration: 5,
     maxTotalDuration: 60,
-    defaultDuration: 5,
+    defaultDuration: 10,
     aspectRatios: ["16:9", "9:16", "1:1"],
     supportsAudio: true,
   },
   {
-    id: "wan-2.6",
-    label: "Wan 2.6",
-    description: "Alibaba Wan 2.6, mendukung audio, start/end frame, dan referensi audio.",
-    durations: durationsFor(5),
-    clipDuration: 5,
-    maxTotalDuration: 60,
-    defaultDuration: 5,
-    aspectRatios: ["16:9", "9:16", "1:1"],
-    supportsAudio: true,
-  },
-  {
-    id: "kling-2.6",
-    label: "Kling 2.6",
-    description: "Kualitas sinematik 1080p dengan lip-sync dan audio bawaan.",
-    durations: durationsFor(5),
-    clipDuration: 5,
-    maxTotalDuration: 60,
-    defaultDuration: 5,
-    aspectRatios: ["16:9", "9:16", "1:1"],
-    supportsAudio: true,
-  },
-  {
-    id: "bytedance/seedance-2.5",
+    id: "seedance-2.5",
     label: "Seedance 2.5",
-    description: "Video hingga 60 detik, mendukung end frame dan referensi audio.",
+    description: "ByteDance Seedance 2.5, kontrol paling detail, hingga 9 foto referensi.",
     durations: durationsFor(5),
     clipDuration: 5,
     maxTotalDuration: 60,
-    defaultDuration: 8,
+    defaultDuration: 10,
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    supportsAudio: true,
+  },
+  {
+    id: "seedance-2.0",
+    label: "Seedance 2.0",
+    description: "ByteDance Seedance 2.0, kontrol tinggi dengan prompt panjang.",
+    durations: durationsFor(5),
+    clipDuration: 5,
+    maxTotalDuration: 60,
+    defaultDuration: 10,
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    supportsAudio: true,
+  },
+  {
+    id: "seedance-2.0-fast",
+    label: "Seedance 2.0 Fast",
+    description: "Seedance 2.0 versi cepat dan lebih murah untuk testing.",
+    durations: durationsFor(5),
+    clipDuration: 5,
+    maxTotalDuration: 60,
+    defaultDuration: 10,
     aspectRatios: ["16:9", "9:16", "1:1"],
     supportsAudio: true,
   },
@@ -132,31 +132,24 @@ function GeneratorInner() {
   const [modelId, setModelId] = useState(FALLBACK_MODELS[0].id);
   const [durationSelection, setDurationSelection] = useState<number | null>(null);
   const [aspectRatio, setAspectRatio] = useState("16:9");
-  const [withAudio, setWithAudio] = useState(true);
   const selectedModel = models.find((m) => m.id === modelId) ?? models[0];
   const duration = selectedModel.durations.includes(durationSelection ?? -1)
     ? (durationSelection as number)
     : selectedModel.defaultDuration;
-  const [style, setStyle] = useState("Sinematik");
+  const [style, setStyle] = useState("UGC / Natural");
   const [phase, setPhase] = useState<Phase>("input");
   const [loading, setLoading] = useState(false);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [moodImages, setMoodImages] = useState<RefImage[]>([]);
   const [characterImages, setCharacterImages] = useState<RefImage[]>([]);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [voiceMode, setVoiceMode] = useState<"ai" | "own">("ai");
+  const [voiceMode] = useState<"ai" | "own">("ai");
   const [voiceId, setVoiceId] = useState(VOICES[0].id);
   const [voiceLang, setVoiceLang] = useState(VOICE_LANGUAGES[0]);
   const [voiceSpeed, setVoiceSpeed] = useState(100);
   const [bgm, setBgm] = useState("upbeat");
-  const [voiceFile, setVoiceFile] = useState<{ name: string; url: string; file?: File } | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [recordError, setRecordError] = useState<string | null>(null);
   const [generation, setGeneration] = useState<GenerationDto | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const voiceFileRef = useRef<HTMLInputElement>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,7 +211,6 @@ function GeneratorInner() {
       form.append("prompt", prompt);
       form.append("duration", String(duration));
       form.append("aspectRatio", aspectRatio);
-      form.append("withAudio", String(withAudio && selectedModel.supportsAudio));
       form.append("scenes", JSON.stringify(scenes));
       form.append(
         "options",
@@ -230,13 +222,16 @@ function GeneratorInner() {
           voiceId,
           voiceSpeed,
           voiceLanguage: voiceLang,
-          voiceFileName: voiceFile?.name,
         })
       );
 
-      const reference = characterImages[0]?.file ?? moodImages[0]?.file;
-      if (reference) {
-        form.append("startFrame", reference, reference.name);
+      const modelImage = characterImages[0]?.file;
+      if (modelImage) {
+        form.append("modelImage", modelImage, modelImage.name);
+      }
+      const productImage = moodImages[0]?.file;
+      if (productImage) {
+        form.append("productImage", productImage, productImage.name);
       }
 
       const response = await fetch("/api/generations", { method: "POST", body: form });
@@ -257,7 +252,7 @@ function GeneratorInner() {
   };
 
   const pollGeneration = async (id: string) => {
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    for (let attempt = 0; attempt < 720; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 5000));
       try {
         const response = await fetch(`/api/generations/${id}`, { cache: "no-store" });
@@ -278,61 +273,6 @@ function GeneratorInner() {
     setScenes((prev) =>
       prev.map((s) => (s.index === i ? { ...s, [field]: value } : s))
     );
-  };
-
-  const setVoiceFromFile = (file: File | undefined) => {
-    if (!file) return;
-    if (!file.type.startsWith("audio/")) {
-      setRecordError(`"${file.name}" bukan file audio.`);
-      return;
-    }
-    setRecordError(null);
-    if (voiceFile) URL.revokeObjectURL(voiceFile.url);
-    setVoiceFile({ name: file.name, url: URL.createObjectURL(file) });
-  };
-
-  const startRecording = async () => {
-    setRecordError(null);
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setRecordError("Browser ini tidak mendukung perekaman mikrofon.");
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, {
-          type: recorder.mimeType || "audio/webm",
-        });
-        if (voiceFile) URL.revokeObjectURL(voiceFile.url);
-        setVoiceFile({
-          name: `rekaman-${Date.now()}.webm`,
-          url: URL.createObjectURL(blob),
-        });
-        stream.getTracks().forEach((t) => t.stop());
-      };
-      recorder.start();
-      recorderRef.current = recorder;
-      setRecording(true);
-    } catch {
-      setRecordError("Tidak bisa mengakses mikrofon. Cek izin browser.");
-    }
-  };
-
-  const stopRecording = () => {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    setRecording(false);
-  };
-
-  const clearVoiceFile = () => {
-    if (voiceFile) URL.revokeObjectURL(voiceFile.url);
-    setVoiceFile(null);
-    setRecordError(null);
   };
 
   return (
@@ -380,54 +320,54 @@ function GeneratorInner() {
                 className="mt-5 w-full rounded-xl bg-background border border-border p-4 text-sm outline-none focus:border-primary resize-none placeholder:text-muted"
               />
 
-              {/* Referensi foto */}
+              {/* Foto model & produk */}
               <div className="mt-7 pt-6 border-t border-border">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="font-bold">Foto referensi (opsional)</h2>
+                    <h2 className="font-bold">Foto model &amp; produk</h2>
                     <p className="mt-1 text-xs text-muted">
-                      Tidak jago nulis prompt? Cukup upload foto — AI akan mengikuti
-                      suasana dan karakter dari gambarmu.
+                      Dipakai untuk membuat first frame otomatis. Semakin jelas fotonya,
+                      semakin konsisten karakter dan produk di video.
                     </p>
                   </div>
                 </div>
 
                 <div className="mt-4 grid sm:grid-cols-2 gap-4">
                   <ImageUpload
-                    label="Suasana / Mood"
-                    hint="Latar, lokasi, atau nuansa yang kamu mau"
+                    label="Foto Model"
+                    hint="Foto pertama dipakai sebagai identitas utama"
                     examples={[
-                      "Latar cafe pagi hari dengan cahaya hangat",
-                      "Studio minimalis dengan background putih",
-                      "Pantai saat golden hour",
-                      "Kantor modern dengan nuansa profesional",
-                    ]}
-                    images={moodImages}
-                    onChange={setMoodImages}
-                  />
-                  <ImageUpload
-                    label="Karakter / Model"
-                    hint="Orang yang tampil di video iklanmu"
-                    examples={[
-                      "Wajah model atau talent yang kamu inginkan",
-                      "Pakaian / outfit yang harus dipakai",
-                      "Produk yang dipegang model",
-                      "Gaya rambut dan makeup referensi",
+                      "Wajah jelas, menghadap kamera",
+                      "Tidak blur dan tidak terpotong",
+                      "Pencahayaan natural",
+                      "Pakaian dan gaya rambut terlihat jelas",
                     ]}
                     images={characterImages}
                     onChange={setCharacterImages}
                   />
+                  <ImageUpload
+                    label="Foto Produk"
+                    hint="Foto pertama dipakai sebagai referensi produk"
+                    examples={[
+                      "Produk utuh, tidak terpotong",
+                      "Label dan logo terbaca jelas",
+                      "Warna produk natural",
+                      "Bentuk dan tekstur terlihat detail",
+                    ]}
+                    images={moodImages}
+                    onChange={setMoodImages}
+                  />
                 </div>
               </div>
 
-              {/* Voiceover */}
+              {/* Suara & audio */}
               <div className="mt-7 pt-6 border-t border-border">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <h2 className="font-bold">Voiceover</h2>
+                    <h2 className="font-bold">Suara &amp; audio</h2>
                     <p className="mt-1 text-xs text-muted">
-                      Pakai suara AI, atau unggah/rekam suaramu sendiri untuk di-mix
-                      dengan musik.
+                      Audio dihasilkan langsung oleh model video (native). Pilih
+                      karakter suara, bahasa, dan kecepatan bicara.
                     </p>
                   </div>
                   <button
@@ -449,27 +389,6 @@ function GeneratorInner() {
 
                 {voiceEnabled && (
                   <div className="mt-4 space-y-5">
-                    {/* Mode suara */}
-                    <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-gray-100">
-                      {[
-                        { key: "ai" as const, label: "🤖 Suara AI" },
-                        { key: "own" as const, label: "🎙️ Suara Sendiri" },
-                      ].map((m) => (
-                        <button
-                          key={m.key}
-                          type="button"
-                          onClick={() => setVoiceMode(m.key)}
-                          className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
-                            voiceMode === m.key
-                              ? "bg-card shadow-sm text-foreground"
-                              : "text-muted hover:text-foreground"
-                          }`}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-
                     {voiceMode === "ai" && (
                       <>
                         {/* Pilih suara */}
@@ -547,78 +466,6 @@ function GeneratorInner() {
                       </>
                     )}
 
-                    {voiceMode === "own" && (
-                      <div className="space-y-4">
-                        <div className="rounded-xl border border-dashed border-border p-5 text-center">
-                          <div className="text-2xl">🎙️</div>
-                          <p className="mt-2 text-sm font-semibold">
-                            Unggah atau rekam suaramu
-                          </p>
-                          <p className="mt-1 text-xs text-muted">
-                            Suaramu akan dipakai sebagai narasi voiceover dan di-mix
-                            dengan musik pilihanmu. AI cukup menyesuaikan durasi tiap
-                            segmen.
-                          </p>
-
-                          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => voiceFileRef.current?.click()}
-                              className="text-xs font-semibold text-primary border border-border rounded-lg px-3 py-2 bg-card"
-                            >
-                              📁 Pilih File Audio
-                            </button>
-                            {!recording ? (
-                              <button
-                                type="button"
-                                onClick={startRecording}
-                                className="text-xs font-semibold text-white bg-red-600 rounded-lg px-3 py-2"
-                              >
-                                ⏺ Rekam Sekarang
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={stopRecording}
-                                className="text-xs font-semibold text-white bg-gray-900 rounded-lg px-3 py-2 animate-pulse"
-                              >
-                                ⏹ Stop Rekaman
-                              </button>
-                            )}
-                          </div>
-                          <p className="mt-2 text-[10px] text-muted">
-                            MP3 / WAV / M4A · maks 25MB · durasi disarankan ≤ {duration}s
-                          </p>
-                        </div>
-
-                        {recordError && (
-                          <p className="text-xs text-red-600">{recordError}</p>
-                        )}
-
-                        {voiceFile && (
-                          <div className="rounded-xl border border-border p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-xs truncate">
-                                🎧 {voiceFile.name}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={clearVoiceFile}
-                                className="text-xs font-semibold text-red-600 shrink-0"
-                              >
-                                Hapus
-                              </button>
-                            </div>
-                            <audio
-                              src={voiceFile.url}
-                              controls
-                              className="mt-2 w-full h-9"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-
                     {/* Musik latar */}
                     <div>
                       <label className="text-sm font-semibold">
@@ -640,21 +487,11 @@ function GeneratorInner() {
                           </button>
                         ))}
                       </div>
-                      <p className="mt-2 text-xs text-muted">🎵 {selectedBgm.desc}</p>
+                      <p className="mt-2 text-xs text-muted">🎵 {selectedBgm.desc} · ditambahkan saat post-production</p>
                     </div>
                   </div>
                 )}
 
-                <input
-                  ref={voiceFileRef}
-                  type="file"
-                  accept="audio/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    setVoiceFromFile(e.target.files?.[0]);
-                    e.target.value = "";
-                  }}
-                />
               </div>
 
               {/* Model + format */}
@@ -728,18 +565,6 @@ function GeneratorInner() {
                   <span>{selectedModel.maxTotalDuration}s</span>
                 </div>
               </div>
-
-              {selectedModel.supportsAudio && (
-                <label className="mt-4 flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={withAudio}
-                    onChange={(e) => setWithAudio(e.target.checked)}
-                    className="accent-primary"
-                  />
-                  Sertakan audio dari model (voice/ambience)
-                </label>
-              )}
 
               {/* Style */}
               <div className="mt-6">
@@ -981,7 +806,7 @@ function GeneratorInner() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted">Format</dt>
-                <dd>{aspectRatio} · audio {withAudio ? "on" : "off"}</dd>
+                <dd>{aspectRatio} · audio native</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted">Referensi</dt>
@@ -990,25 +815,15 @@ function GeneratorInner() {
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-muted">Voiceover</dt>
+                <dt className="text-muted">Suara</dt>
                 <dd className="text-right">
                   {voiceEnabled ? (
-                    voiceMode === "own" ? (
-                      <>
-                        Suara Sendiri
-                        <span className="block text-[10px] text-muted truncate max-w-[160px]">
-                          {voiceFile ? voiceFile.name : "belum ada file"}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        {selectedVoice.name} (AI)
-                        <span className="block text-[10px] text-muted">
-                          {voiceLang.split(" ")[0]} ·{" "}
-                          {(voiceSpeed / 100).toFixed(2)}×
-                        </span>
-                      </>
-                    )
+                    <>
+                      {selectedVoice.name} (native)
+                      <span className="block text-[10px] text-muted">
+                        {voiceLang.split(" ")[0]} · {(voiceSpeed / 100).toFixed(2)}×
+                      </span>
+                    </>
                   ) : (
                     "Nonaktif"
                   )}
