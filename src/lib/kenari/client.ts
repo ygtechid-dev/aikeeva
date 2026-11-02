@@ -37,18 +37,35 @@ function extractError(body: unknown): string | null {
   for (const key of ["error", "message", "failure_reason", "detail"]) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
+    if (value && typeof value === "object") {
+      const nested = (value as Record<string, unknown>).message;
+      if (typeof nested === "string" && nested.trim()) return nested.trim();
+    }
   }
   return null;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  let url = `${baseUrl()}${path}`;
+  let attempt = 0;
   let response: Response;
   try {
-    response = await fetch(`${baseUrl()}${path}`, { ...init, cache: "no-store" });
+    while (true) {
+      response = await fetch(url, { ...init, cache: "no-store", redirect: "follow" });
+      if ((response.status === 301 || response.status === 302) && response.headers.get("location")) {
+        attempt += 1;
+        if (attempt > 3) {
+          throw new Error(`Terlalu banyak redirect dari ${baseUrl()}.`);
+        }
+        url = new URL(response.headers.get("location") as string, url).toString();
+        continue;
+      }
+      break;
+    }
   } catch (error) {
     throw new KenariError(
       `Tidak bisa menghubungi backend Kenari (${baseUrl()}). ` +
-        `Pastikan server aikenarivideo berjalan. (${(error as Error).message})`,
+        `Pastikan server aikenarivideo berjalan dan KENARI_API_BASE_URL benar. (${(error as Error).message})`,
       502
     );
   }
@@ -73,7 +90,7 @@ export type CreateVideoInput = {
   duration: number;
   resolution?: Resolution;
   aspectRatio?: AspectRatio;
-  /** Frame pertama (image-to-video). Dikirim sebagai data URL ke field image_url. */
+  /** Frame pertama (image-to-video). Diunggah dulu, dikirim sebagai URL publik. */
   firstFrame?: ImageAsset | null;
   /** Frame akhir opsional. */
   endFrame?: ImageAsset | null;
@@ -86,14 +103,34 @@ export type CreateVideoResult = {
   status: string;
 };
 
-function toDataUrl(asset: ImageAsset) {
-  return `data:${asset.mimeType};base64,${asset.buffer.toString("base64")}`;
-}
-
 function fileExtension(mimeType: string) {
   if (mimeType === "image/png") return "png";
   if (mimeType === "image/webp") return "webp";
   return "jpg";
+}
+
+/**
+ * Kenari menolak data URL untuk image_url; frame harus berupa URL publik.
+ * Jadi upload dulu ke backend, lalu pakai URL hasilnya.
+ */
+async function uploadFrame(asset: ImageAsset): Promise<string> {
+  const form = new FormData();
+  form.append(
+    "image",
+    new Blob([new Uint8Array(asset.buffer)], { type: asset.mimeType }),
+    `frame.${fileExtension(asset.mimeType)}`
+  );
+
+  const raw = await request<{ url?: string }>("/api/frames", {
+    method: "POST",
+    body: form,
+  });
+
+  if (!raw.url) {
+    throw new KenariError("Backend Kenari tidak mengembalikan URL frame.", 502, raw);
+  }
+
+  return raw.url;
 }
 
 export async function createVideoGeneration(input: CreateVideoInput): Promise<CreateVideoResult> {
@@ -103,15 +140,25 @@ export async function createVideoGeneration(input: CreateVideoInput): Promise<Cr
   form.append("duration", String(input.duration));
   if (input.resolution) form.append("resolution", input.resolution);
   if (input.aspectRatio) form.append("aspect_ratio", input.aspectRatio);
-  if (input.firstFrame) form.append("image_url", toDataUrl(input.firstFrame));
-  if (input.endFrame) form.append("end_image_url", toDataUrl(input.endFrame));
 
-  for (const [index, asset] of (input.referenceImages ?? []).entries()) {
-    form.append(
-      "references",
-      new Blob([new Uint8Array(asset.buffer)], { type: asset.mimeType }),
-      `reference-${index + 1}.${fileExtension(asset.mimeType)}`
-    );
+  // Kenari hanya menerima salah satu: start/end frame ATAU reference images.
+  const useFrame = Boolean(input.firstFrame || input.endFrame);
+
+  if (input.firstFrame) {
+    form.append("image_url", await uploadFrame(input.firstFrame));
+  }
+  if (input.endFrame) {
+    form.append("end_image_url", await uploadFrame(input.endFrame));
+  }
+
+  if (!useFrame) {
+    for (const [index, asset] of (input.referenceImages ?? []).entries()) {
+      form.append(
+        "references",
+        new Blob([new Uint8Array(asset.buffer)], { type: asset.mimeType }),
+        `reference-${index + 1}.${fileExtension(asset.mimeType)}`
+      );
+    }
   }
 
   const raw = await request<{ id?: string; status?: string }>("/api/videos/generations", {

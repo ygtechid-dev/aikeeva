@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS generation_clips (
   status VARCHAR(20) NOT NULL DEFAULT 'queued',
   compiled_prompt TEXT NOT NULL,
   negative_prompt TEXT NULL,
+  retry_count INT NOT NULL DEFAULT 0,
   scenes JSON NULL,
   video_url TEXT NULL,
   error_message TEXT NULL,

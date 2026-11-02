@@ -214,7 +214,7 @@ export async function updateGeneration(
   if (patch.errorMessage !== undefined) set("error_message", patch.errorMessage);
 
   if (patch.completedAt === "now") {
-    assignments.push("completed_at = UTC_TIMESTAMP()");
+    assignments.push("completed_at = NOW()");
   } else if (patch.completedAt === null) {
     set("completed_at", null);
   }

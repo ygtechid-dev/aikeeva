@@ -2,11 +2,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import mysql from "mysql2/promise";
 
-const ENV_FILE = process.env.MIGRATE_ENV_FILE ?? ".env.local";
+const ENV_FILES = process.env.MIGRATE_ENV_FILE
+  ? [process.env.MIGRATE_ENV_FILE]
+  : [".env", ".env.local"];
 
-function loadEnvFile() {
+function loadEnvFile(file) {
   try {
-    const raw = readFileSync(join(process.cwd(), ENV_FILE), "utf8");
+    const raw = readFileSync(join(process.cwd(), file), "utf8");
     for (const line of raw.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
@@ -23,7 +25,9 @@ function loadEnvFile() {
   }
 }
 
-loadEnvFile();
+for (const file of ENV_FILES) {
+  loadEnvFile(file);
+}
 
 const required = ["MYSQL_HOST", "MYSQL_USER", "MYSQL_DATABASE"];
 
@@ -138,6 +142,20 @@ async function main() {
       await connection.end();
       process.exit(1);
     }
+  }
+
+  // Migrasi kolom tambahan yang tidak bisa idempotent lewat schema.sql
+  // (MySQL 5.7 tidak punya ADD COLUMN IF NOT EXISTS).
+  const [retryColumn] = await connection.query(
+    `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'generation_clips' AND COLUMN_NAME = 'retry_count'`,
+    [database]
+  );
+  if (retryColumn.length === 0) {
+    await connection.query(
+      "ALTER TABLE generation_clips ADD COLUMN retry_count INT NOT NULL DEFAULT 0"
+    );
+    console.log("Ditambahkan kolom generation_clips.retry_count");
   }
 
   await connection.end();

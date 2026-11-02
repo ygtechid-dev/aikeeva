@@ -10,6 +10,7 @@ export type ClipRecord = {
   clipIndex: number;
   providerGenerationId: string | null;
   status: ClipStatus;
+  retryCount: number;
   compiledPrompt: string;
   negativePrompt: string | null;
   scenes: Scene[];
@@ -22,8 +23,8 @@ export type ClipRecord = {
 type Row = Record<string, unknown>;
 
 const SELECT_COLUMNS = `
-  id, generation_id, clip_index, provider_generation_id, status, compiled_prompt, negative_prompt,
-  scenes, video_url, error_message, created_at, completed_at
+  id, generation_id, clip_index, provider_generation_id, status, retry_count, compiled_prompt,
+  negative_prompt, scenes, video_url, error_message, created_at, completed_at
 `;
 
 function parseScenes(value: unknown): Scene[] {
@@ -43,6 +44,7 @@ function mapRow(row: Row): ClipRecord {
     clipIndex: Number(row.clip_index),
     providerGenerationId: row.provider_generation_id ? String(row.provider_generation_id) : null,
     status: String(row.status) as ClipStatus,
+    retryCount: Number(row.retry_count ?? 0),
     compiledPrompt: String(row.compiled_prompt),
     negativePrompt: row.negative_prompt ? String(row.negative_prompt) : null,
     scenes: parseScenes(row.scenes),
@@ -102,6 +104,8 @@ export async function updateClip(
   patch: {
     providerGenerationId?: string | null;
     status?: ClipStatus;
+    retryCount?: number;
+    compiledPrompt?: string;
     videoUrl?: string | null;
     errorMessage?: string | null;
     completedAt?: "now" | null;
@@ -117,11 +121,13 @@ export async function updateClip(
 
   if (patch.providerGenerationId !== undefined) set("provider_generation_id", patch.providerGenerationId);
   if (patch.status !== undefined) set("status", patch.status);
+  if (patch.retryCount !== undefined) set("retry_count", patch.retryCount);
+  if (patch.compiledPrompt !== undefined) set("compiled_prompt", patch.compiledPrompt);
   if (patch.videoUrl !== undefined) set("video_url", patch.videoUrl);
   if (patch.errorMessage !== undefined) set("error_message", patch.errorMessage);
 
   if (patch.completedAt === "now") {
-    assignments.push("completed_at = UTC_TIMESTAMP()");
+    assignments.push("completed_at = NOW()");
   } else if (patch.completedAt === null) {
     set("completed_at", null);
   }

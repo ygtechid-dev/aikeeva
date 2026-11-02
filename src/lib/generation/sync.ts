@@ -10,6 +10,8 @@ import {
 import { concatClips, extractLastFrame } from "@/lib/media/ffmpeg";
 import { saveVideo } from "@/lib/media/storage";
 import { listClips, updateClip, type ClipRecord } from "./clips";
+import { compilePrompt, type GenerationOptions } from "./prompt";
+import { MAX_CLIP_RETRIES } from "./constants";
 import { getGenerationById, updateGeneration, type GenerationRecord } from "./store";
 import { submitClip } from "./submit";
 
@@ -34,9 +36,22 @@ async function syncClip(clip: ClipRecord): Promise<ClipRecord> {
   }
 
   if (job.status === "failed" || job.status === "expired") {
+    // Provider sering menolak sementara (konten, antrean, dsb). Coba ulang
+    // dengan prompt yang sama sebelum menyerah.
+    const reason = job.failureReason ?? "Klip gagal dirender.";
+    if (clip.retryCount < MAX_CLIP_RETRIES) {
+      return updateClip(clip.id, {
+        status: "queued",
+        providerGenerationId: null,
+        retryCount: clip.retryCount + 1,
+        errorMessage: `Percobaan ${clip.retryCount + 1} gagal: ${reason}`,
+        completedAt: null,
+      });
+    }
+
     return updateClip(clip.id, {
       status: "failed",
-      errorMessage: job.failureReason ?? "Klip gagal dirender.",
+      errorMessage: reason,
       completedAt: "now",
     });
   }
@@ -83,7 +98,10 @@ async function syncLocked(record: GenerationRecord): Promise<GenerationRecord> {
   }
 
   const synced = await Promise.all(clips.map((clip) => syncClip(clip).catch(() => clip)));
-  const failed = synced.filter((clip) => clip.status === "failed");
+  const retryExhausted = (clip: ClipRecord) =>
+    clip.status === "queued" && !clip.providerGenerationId && clip.retryCount > MAX_CLIP_RETRIES;
+
+  const failed = synced.filter((clip) => clip.status === "failed" || retryExhausted(clip));
   const done = synced.filter((clip) => clip.status === "complete" && clip.videoUrl);
 
   if (failed.length > 0) {
@@ -98,14 +116,19 @@ async function syncLocked(record: GenerationRecord): Promise<GenerationRecord> {
 
   // Klip berikutnya baru dikirim setelah klip sebelumnya selesai, memakai
   // frame terakhir klip sebelumnya sebagai start frame (chaining).
-  const nextIndex = synced.findIndex((clip) => clip.status === "queued" && !clip.providerGenerationId);
+  const nextIndex = synced.findIndex(
+    (clip) => clip.status === "queued" && !clip.providerGenerationId && clip.retryCount <= MAX_CLIP_RETRIES
+  );
   const previousDone =
     nextIndex >= 0 &&
     synced.slice(0, nextIndex).every((clip) => clip.status === "complete" && clip.videoUrl);
 
   if (nextIndex >= 0 && previousDone) {
     const clip = synced[nextIndex];
-    const payload = (record.requestPayload ?? {}) as { resolution?: Resolution };
+    const payload = (record.requestPayload ?? {}) as {
+      resolution?: Resolution;
+      options?: GenerationOptions;
+    };
     const resolution = payload.resolution ?? resolveResolution(spec);
     let firstFrame = null;
 
@@ -117,12 +140,37 @@ async function syncLocked(record: GenerationRecord): Promise<GenerationRecord> {
       }
     }
 
+    // Prompt klip lanjutan harus menyebut start frame (hasil chaining), bukan
+    // foto referensi yang sebenarnya tidak dikirim pada klip ini.
+    let prompt = clip.compiledPrompt;
+    try {
+      const recompiled = compilePrompt({
+        model: record.model as VideoModelId,
+        aspectRatio: record.aspectRatio as AspectRatio,
+        duration: spec.clipDuration,
+        userPrompt: record.userPrompt,
+        scenes: clip.scenes,
+        options: payload.options ?? {},
+        hasFirstFrame: true,
+        hasModelRef: false,
+        hasProductRef: false,
+        clipIndex: clip.clipIndex,
+        clipCount: synced.length,
+      });
+      prompt = recompiled.prompt;
+      if (prompt !== clip.compiledPrompt) {
+        await updateClip(clip.id, { compiledPrompt: prompt });
+      }
+    } catch (error) {
+      console.error(`recompile prompt failed for ${record.id} clip ${clip.clipIndex}`, error);
+    }
+
     try {
       const submit = (frame: typeof firstFrame) =>
         submitClip({
           clip,
           model: record.model as VideoModelId,
-          prompt: clip.compiledPrompt,
+          prompt,
           duration: spec.clipDuration,
           resolution,
           aspectRatio: record.aspectRatio as AspectRatio,
@@ -144,12 +192,23 @@ async function syncLocked(record: GenerationRecord): Promise<GenerationRecord> {
       });
     } catch (error) {
       console.error(`submit next clip failed for ${record.id}`, error);
-      await updateGeneration(record.id, {
-        status: "failed",
-        progress: `${done.length}/${synced.length} klip selesai`,
-        errorMessage: "Gagal mengirim klip berikutnya ke Kenari.",
-        completedAt: "now",
-      });
+      // Kalau klip masih queued, submitClip sudah menjadwalkan retry.
+      const [latest] = (await listClips(record.id)).filter((item) => item.id === clip.id);
+      const willRetry = latest?.status === "queued" && !latest.providerGenerationId;
+
+      if (willRetry) {
+        await updateGeneration(record.id, {
+          status: "processing",
+          progress: `${done.length}/${synced.length} klip selesai (mencoba ulang)`,
+        });
+      } else {
+        await updateGeneration(record.id, {
+          status: "failed",
+          progress: `${done.length}/${synced.length} klip selesai`,
+          errorMessage: latest?.errorMessage ?? "Gagal mengirim klip berikutnya ke Kenari.",
+          completedAt: "now",
+        });
+      }
     }
 
     return (await getGenerationById(record.id)) ?? record;

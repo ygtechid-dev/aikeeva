@@ -140,7 +140,10 @@ export async function POST(request: Request) {
         productImage,
       });
     }
-    if (!firstFrame && modelImage) {
+    // Fallback: pakai foto model sebagai start frame hanya kalau tidak ada foto
+    // produk. Kalau ada produk, lebih baik kirim sebagai reference images karena
+    // Kenari tidak menerima start frame + referensi sekaligus.
+    if (!firstFrame && modelImage && !productImage) {
       firstFrame = modelImage;
     }
     if (firstFrame) {
@@ -148,6 +151,11 @@ export async function POST(request: Request) {
     }
 
     const compiledClips = plans.map((plan) => {
+      // Klip 0: start frame kalau ada, kalau tidak pakai foto referensi.
+      // Klip 1+: selalu memakai frame terakhir klip sebelumnya (chaining).
+      const usesStartFrame = Boolean(firstFrame) || plan.clipIndex > 0;
+      const usesReferences = !usesStartFrame && plan.clipIndex === 0;
+
       const compiled = compilePrompt({
         model,
         aspectRatio,
@@ -155,9 +163,9 @@ export async function POST(request: Request) {
         userPrompt: prompt,
         scenes: plan.scenes,
         options,
-        hasFirstFrame: Boolean(firstFrame),
-        hasModelRef: Boolean(modelImage) && plan.clipIndex === 0,
-        hasProductRef: Boolean(productImage) && plan.clipIndex === 0,
+        hasFirstFrame: usesStartFrame,
+        hasModelRef: usesReferences && Boolean(modelImage),
+        hasProductRef: usesReferences && Boolean(productImage),
         clipIndex: plan.clipIndex,
         clipCount: plans.length,
       });
@@ -193,6 +201,7 @@ export async function POST(request: Request) {
       withAudio: spec.supportsAudio,
       requestPayload: {
         resolution,
+        options,
         firstFrameGenerated: Boolean(firstFrame),
         modelImage: Boolean(modelImage),
         productImage: Boolean(productImage),
@@ -250,12 +259,21 @@ export async function POST(request: Request) {
           error instanceof KenariError
             ? `Kenari menolak klip 1: ${error.message}`
             : "Gagal mengirim klip pertama ke Kenari.";
-        await updateGeneration(record.id, {
-          status: "failed",
-          errorMessage: message,
-          completedAt: "now",
-        });
-        return jsonError(message, 502, { generationId: record.id });
+        const permanent =
+          error instanceof KenariError && error.status >= 400 && error.status < 500;
+
+        // Error sementara: biarkan generation tetap jalan, klip akan dikirim
+        // ulang oleh sync berikutnya (retry_count).
+        await updateGeneration(
+          record.id,
+          permanent
+            ? { status: "failed", errorMessage: message, completedAt: "now" }
+            : { status: "pending", progress: "Menunggu percobaan ulang klip 1", errorMessage: message }
+        );
+
+        if (permanent) {
+          return jsonError(message, 502, { generationId: record.id });
+        }
       }
     }
 
